@@ -40,6 +40,8 @@ def session(tmp_path, cwd, requested):
     ("~/skills/example/SKILL.md", "C:/Work", None),
     ("file:///C:/skills/example/SKILL.md", "C:/Work", None),
     ("relative/SKILL.md", r"\\?\C:\Work", None),
+    ("relative/SKILL.md", "//?/C:/Work", None),
+    ("relative/SKILL.md", "//./C:/Work", None),
     ("/workspace/./skills/example/SKILL.md", "/workspace", "/workspace/skills/example/SKILL.md"),
 ])
 def test_recorded_namespaces_resolve_without_host_or_cross_os_guessing(tmp_path, requested, cwd, expected):

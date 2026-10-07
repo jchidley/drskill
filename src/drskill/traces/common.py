@@ -80,10 +80,13 @@ def resolve_read_path(requested: str, cwd: str | None) -> tuple[str | None, list
             normalized = normalized[0].upper() + normalized[1:]
         return normalized
 
-    if requested.startswith(("\\\\?\\", "\\\\.\\", "//?/", "//./")):
+    device_prefixes = ("\\\\?\\", "\\\\.\\", "//?/", "//./")
+    if requested.startswith(device_prefixes):
         return None, ["Unresolved Windows device or extended namespace"]
     if windows_absolute(requested):
         return windows_normalize(requested), windows_qualification
+    if isinstance(cwd, str) and cwd.startswith(device_prefixes):
+        return None, ["Unresolved path context: Windows device or extended cwd namespace"]
     if isinstance(cwd, str) and windows_absolute(cwd):
         # Root-relative requests lack a drive/share; POSIX-looking absolute paths
         # could instead be WSL aliases. Neither is inferred from a Windows cwd.
