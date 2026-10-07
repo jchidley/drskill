@@ -119,7 +119,7 @@ temporary projections; this is not a replay of the original sessions.
 
 The demonstration also includes an explicitly labelled **synthetic,
 source-qualified** 256-row incomplete record with omitted >8 KiB arguments,
-aggregate-argument loss and one complete partial read. It does not claim to
+per-call argument loss and one complete partial read. It does not claim to
 execute recorder overflow. Expected summary:
 
 ```json
@@ -135,8 +135,8 @@ Eight occurrences are observed projections (five main, two inherited-boundary,
 one standalone child); one is synthetic. Missing standalone result time is
 retained as null with a diagnostic. Output includes full successful rows,
 provenance, qualifications, ownership and diagnostics. Temporary source paths
-vary; summary and occurrence IDs are stable. The tests additionally demonstrate
-missing child/parent files, conflicting ancestry, cycles, unrelated equal IDs,
+vary; summary and occurrence IDs are stable. The tests separately demonstrate 32 KiB aggregate argument loss and inherited
+path qualifications, as well as missing child/parent files, conflicting ancestry, cycles, unrelated equal IDs,
 failed/unfinished/malformed reads, duplicate identity, aliases, preview-only
 records and recorder bounds. Synthetic cases are labelled as such in test names.
 
@@ -145,7 +145,7 @@ records and recorder bounds. Synthetic cases are labelled as such in test names.
 Task-start review baseline: `8ba75d732357800554b4ddc35a0871b0a516b99a`,
 branch `local/pi-support`, clean at start.
 
-- Focused public discovery/extraction/pipeline tests: **123 passed**.
+- Initial focused public discovery/extraction/pipeline tests: **123 passed**.
 - `uv run pytest`: **1191 passed, 7 failed**. Two deep tests require missing
   `litellm`; five MCP connect tests require missing `mcp` (optional extras).
   This is **not** a green full-suite gate. No dependencies or extras were installed.

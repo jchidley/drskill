@@ -243,5 +243,6 @@ def extract_corpus(paths: list[Path]) -> PiExtractResult:
         row.inheritance = "independent" if owner is row else "inherited"
         if owner is not row:
             row.resolved_path = owner.resolved_path
-            row.qualifications.append("Inherited request resolved in verified execution owner's session cwd")
+            row.qualifications = list(owner.qualifications)
+            row.qualifications.append("Inherited request path uses verified execution owner's context")
     return result

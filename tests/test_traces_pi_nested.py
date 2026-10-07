@@ -1,7 +1,8 @@
 """Observed projections and explicitly synthetic regressions at Pi extract(Path)."""
 import json
-import pytest
 from pathlib import Path
+
+import pytest
 
 from drskill.traces import pi
 
@@ -57,7 +58,7 @@ def test_synthetic_incomplete_rows_never_certify_success(tmp_path, row):
 
 
 def test_synthetic_complete_rows_survive_recorder_bounds(tmp_path):
-    # 256 retained calls with omitted >8KiB arguments and aggregate >32KiB loss.
+    # 256 retained calls with omitted >8KiB per-call arguments.
     rows = [read_row(f"call/{i}", arguments=None, argumentsBytes=8193) for i in range(255)]
     rows.append(read_row("call/256", arguments={"path": "./skills/example/SKILL.md", "limit": 10}))
     result = pi.extract(write_session(tmp_path, {"type": "session", "id": "s", "cwd": "/workspace"},
@@ -109,7 +110,6 @@ def observed_boundary_sessions(tmp_path):
     fixture = json.loads((FIXTURES / "observed-session-boundaries.json").read_text())
     fork = fixture["cases"][1]
     parent = tmp_path / "parent.jsonl"
-    child = tmp_path / "fork.jsonl"
     paths = []
     for header, occurrence, name in zip(fork["headers"], fork["occurrences"], ["parent.jsonl", "fork.jsonl"]):
         header = dict(header)
@@ -135,6 +135,35 @@ def test_observed_corpus_fork_and_standalone(tmp_path):
     standalone = next(r for r in result.nested_reads if r.occurrence[0] == "session-child")
     assert standalone.inheritance == "independent"
     assert standalone.result_record_time is None
+
+
+def test_synthetic_inherited_path_uses_owner_context_and_qualifications(tmp_path):
+    from drskill.traces.pipeline import extract_pi_nested_corpus
+    parent = tmp_path / "parent.jsonl"
+    entry = synthetic_result([read_row()])
+    child_header = {"type": "session", "id": "child", "cwd": "/different",
+                    "parentSession": str(parent)}
+    write_session(tmp_path, {"type": "session", "id": "parent"}, [entry], "parent.jsonl")
+    child = write_session(tmp_path, child_header, [entry], "child.jsonl")
+    result = extract_pi_nested_corpus([parent, child])
+    row = next(r for r in result.nested_reads if r.occurrence[0] == "child")
+    assert row.inheritance == "inherited"
+    assert row.resolved_path is None
+    assert "Relative path unresolved: missing absolute session cwd" in row.qualifications
+
+
+def test_synthetic_aggregate_argument_loss_keeps_complete_rows(tmp_path):
+    # Four <8 KiB retained arguments fill most of the 32 KiB aggregate budget.
+    rows = [read_row(f"call/{i}", arguments={
+        "path": f"skills/example{i}/SKILL.md", "fixturePadding": "x" * 7900}) for i in range(4)]
+    rows.append(read_row("call/4", arguments=None, argumentsBytes=7950))
+    rows.append(read_row("call/5"))
+    result = pi.extract(write_session(tmp_path, {"type": "session", "id": "s", "cwd": "/workspace"},
+                                         [synthetic_result(rows, complete=False)]))
+    assert len(result.nested_reads) == 5
+    assert len(json.dumps(rows[0]["arguments"]).encode()) < 8192
+    assert sum(len(json.dumps(r["arguments"]).encode()) for r in rows[:4]) + 7950 > 32768
+    assert any(d.code == "invalid-read-evidence" for d in result.nested_diagnostics)
 
 
 @pytest.mark.parametrize("case", ["missing-parent", "missing-child", "conflict", "cycle", "unrelated"])
