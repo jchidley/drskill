@@ -5,6 +5,7 @@ import hashlib
 import json
 import posixpath
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -13,7 +14,7 @@ from pydantic import BaseModel, Field
 from drskill.traces.model import ExtractResult
 from drskill.traces.common import parse_ts
 
-PATH_LIMITS = "recorder bounds: 256 calls, 8 KiB arguments/call, 32 KiB arguments/result"
+RECORDER_BOUNDS = "recorder bounds: 256 calls, 8 KiB arguments/call, 32 KiB arguments/result"
 
 
 class NestedDiagnostic(BaseModel):
@@ -43,11 +44,18 @@ class PiExtractResult(ExtractResult):
     nested_diagnostics: list[NestedDiagnostic] = Field(default_factory=list)
 
 
+@dataclass
+class _SessionSnapshot:
+    header: dict
+    entries: dict[str, dict]
+    extracted: PiExtractResult
+
+
 def extract_nested(path: Path) -> PiExtractResult:
-    return _extract_snapshot(path, path.read_bytes())
+    return _extract_snapshot(path, path.read_bytes()).extracted
 
 
-def _extract_snapshot(path: Path, raw: bytes) -> PiExtractResult:
+def _extract_snapshot(path: Path, raw: bytes) -> _SessionSnapshot:
     result = PiExtractResult()
     records = []
     source_sha256 = hashlib.sha256(raw).hexdigest()
@@ -94,7 +102,7 @@ def _extract_snapshot(path: Path, raw: bytes) -> PiExtractResult:
             diagnostic("malformed-nested-record", line, "Expected structured calls array")
             continue
         if nested.get("complete") is not True:
-            diagnostic("incomplete-coverage", line, PATH_LIMITS)
+            diagnostic("incomplete-coverage", line, RECORDER_BOUNDS)
         calls = nested["calls"]
         ids = [row.get("id") for row in calls if isinstance(row, dict) and isinstance(row.get("id"), str)]
         for row in calls:
@@ -117,7 +125,7 @@ def _extract_snapshot(path: Path, raw: bytes) -> PiExtractResult:
                 or ids.count(call_id) != 1
                 or not isinstance(requested, str) or not requested.strip()):
                 diagnostic("invalid-read-evidence", line,
-                           "Stable session/result/call identity and structured path required; " + PATH_LIMITS)
+                           "Stable session/result/call identity and structured path required; " + RECORDER_BOUNDS)
                 continue
             qualifications = [
                 "Finalized pipeline outcome for recorded request, not attested OS access; transformations may change effective path/outcome",
@@ -153,7 +161,8 @@ def _extract_snapshot(path: Path, raw: bytes) -> PiExtractResult:
     if not seen_evidence:
         diagnostic("capability-unknown", None,
                    "No structured records retained; format version cannot establish recording capability")
-    return result
+    entries = {event["id"]: event for _, event in records if isinstance(event.get("id"), str)}
+    return _SessionSnapshot(header=header, entries=entries, extracted=result)
 
 
 def extract_corpus(paths: list[Path]) -> PiExtractResult:
@@ -163,37 +172,26 @@ def extract_corpus(paths: list[Path]) -> PiExtractResult:
     not permission to traverse the filesystem or infer missing child executions.
     """
     result = PiExtractResult()
-    snapshots = {}
+    snapshots: dict[Path, _SessionSnapshot] = {}
     for path in sorted(set(p.resolve() for p in paths)):
         try:
             raw = path.read_bytes()
-            extracted = _extract_snapshot(path, raw)
-            events = []
-            for text in raw.decode("utf-8", errors="replace").splitlines():
-                try:
-                    event = json.loads(text)
-                except ValueError:
-                    continue
-                if isinstance(event, dict):
-                    events.append(event)
+            snapshot = _extract_snapshot(path, raw)
         except OSError as error:
             result.nested_diagnostics.append(NestedDiagnostic(
                 code="missing-session", source_file=str(path), detail=type(error).__name__))
             continue
-        headers = [e for e in events if e.get("type") == "session"]
-        header = headers[0] if len(headers) == 1 else {}
-        entries = {e["id"]: e for e in events if isinstance(e.get("id"), str)}
-        snapshots[path] = (header, entries, extracted)
-        result.nested_reads.extend(extracted.nested_reads)
-        result.nested_diagnostics.extend(extracted.nested_diagnostics)
+        snapshots[path] = snapshot
+        result.nested_reads.extend(snapshot.extracted.nested_reads)
+        result.nested_diagnostics.extend(snapshot.extracted.nested_diagnostics)
 
-    session_ids = [snapshot[0].get("id") for snapshot in snapshots.values()]
+    session_ids = [snapshot.header.get("id") for snapshot in snapshots.values()]
 
     def ancestry(path):
         chain = []
         seen = {path}
         while True:
-            header = snapshots[path][0]
+            header = snapshots[path].header
             session_id = header.get("id")
             if not isinstance(session_id, str) or session_ids.count(session_id) != 1:
                 return chain, "ambiguous-session"
@@ -218,16 +216,16 @@ def extract_corpus(paths: list[Path]) -> PiExtractResult:
         path = Path(row.source_file)
         chain, problem = ancestry(path)
         owner = row
-        entry = snapshots[path][1][row.occurrence[1]]
+        entry = snapshots[path].entries[row.occurrence[1]]
         if problem is None:
             for ancestor in chain:
-                candidate = snapshots[ancestor][1].get(row.occurrence[1])
+                candidate = snapshots[ancestor].entries.get(row.occurrence[1])
                 if candidate is None:
                     continue
                 if candidate.get("message") != entry.get("message"):
                     problem = "conflicting-payload"
                     break
-                matches = [r for r in snapshots[ancestor][2].nested_reads
+                matches = [r for r in snapshots[ancestor].extracted.nested_reads
                            if r.occurrence[1:] == row.occurrence[1:]]
                 if len(matches) != 1:
                     problem = "invalid-ancestor-evidence"

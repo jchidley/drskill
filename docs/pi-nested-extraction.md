@@ -164,6 +164,20 @@ Ticket completion must be recorded in a separate agent-skills-root session;
 this drskill commit does not edit the coordinator ticket or unblock ticket 03
 by itself.
 
+## Review follow-up
+
+Standards review of `1ca77f1` found no documented-standard violations and four
+judgement-call smells. Renamed the recorder-bounds constant, removed duplicate
+JSONL parsing, and replaced positional snapshot tuples with a named internal
+dataclass. Kept the small demo/test projection duplication intentionally: sharing
+fixture construction would couple the independent regression setup to the demo.
+
+Parent verification found and corrected inherited path qualifications:
+the child now receives the verified owner's context and qualifications.
+Added separate aggregate-budget and missing-owner-cwd regressions.
+Post-follow-up focused tests: **125 passed**; trace-only focused tests after
+the snapshot refactor: **62 passed**. The demonstration still returns 9/8/1/0.
+
 ## Source evidence and historical qualification
 
 Ticket 01's source-qualified extraction contract is at
