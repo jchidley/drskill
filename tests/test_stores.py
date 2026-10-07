@@ -85,6 +85,61 @@ def test_claude_code_malformed_state_is_unreadable_not_crash(tmp_path):
     assert plugins == [] and unreadable == [str(p)]
 
 
+def test_pi_local_package_skills_from_settings(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    package = tmp_path / "agent-skills"
+    _skill(package / "skills", "from-package")
+    (package / "package.json").write_text(json.dumps({
+        "name": "pi-suite", "pi": {"skills": ["./skills"]}
+    }), encoding="utf-8")
+    settings = home / ".pi" / "agent" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"packages": [str(package)]}), encoding="utf-8")
+    plugins, unreadable = discover_plugins("pi", home, proj)
+    assert unreadable == []
+    assert len(plugins) == 1
+    assert plugins[0].name == "pi-suite"
+    assert plugins[0].skills_roots == [package / "skills"]
+
+
+def test_pi_local_package_respects_empty_manifest_and_disabled_skills(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    package = tmp_path / "package"
+    _skill(package / "skills", "not-declared")
+    (package / "package.json").write_text(json.dumps({
+        "pi": {"skills": []}
+    }), encoding="utf-8")
+    settings = home / ".pi" / "agent" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"packages": [str(package)]}), encoding="utf-8")
+    plugins, unreadable = discover_plugins("pi", home, proj)
+    assert unreadable == []
+    assert plugins[0].skills_roots == []
+    (package / "package.json").unlink()
+    settings.write_text(json.dumps({"packages": [{
+        "source": str(package), "skills": []
+    }]}), encoding="utf-8")
+    plugins, unreadable = discover_plugins("pi", home, proj)
+    assert unreadable == []
+    assert plugins[0].skills_roots == []
+
+
+def test_pi_unsupported_skill_filter_is_reported_not_guessed(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    package = tmp_path / "package"
+    _skill(package / "skills", "filtered")
+    settings = home / ".pi" / "agent" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"packages": [{
+        "source": str(package), "skills": ["skills/*.md"]
+    }]}), encoding="utf-8")
+    plugins, unreadable = discover_plugins("pi", home, proj)
+    assert plugins == [] and unreadable == [str(settings)]
+
+
 def test_missing_state_and_unknown_harness_are_empty(tmp_path):
     home, proj = tmp_path / "home", tmp_path / "proj"
     home.mkdir(); proj.mkdir()

@@ -19,6 +19,7 @@ also break legitimate out-of-store installs (codex "local" version dirs).
 from __future__ import annotations
 
 import json
+import os
 import tomllib
 from pathlib import Path
 from typing import Callable, Literal
@@ -431,12 +432,100 @@ def _droid(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], list[
     return out, unreadable
 
 
+# --- pi ---------------------------------------------------------------------
+# Pi packages are declared in global/project settings. This adapter resolves
+# local package directories (the form used for checked-out skill suites) and
+# reads their package.json ``pi.skills`` roots or conventional ``skills/``.
+def _pi(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], list[str]]:
+    unreadable: list[str] = []
+    agent_dir = Path(os.environ.get("PI_CODING_AGENT_DIR", home / ".pi" / "agent"))
+    settings_files = [
+        (agent_dir / "settings.json", "user"),
+        (project_root / ".pi" / "settings.json", "project"),
+    ]
+    out: list[InstalledPlugin] = []
+    by_root: dict[Path, InstalledPlugin] = {}
+    for settings_path, scope in settings_files:
+        data = _read_json(settings_path, unreadable)
+        if data is None:
+            continue
+        if not isinstance(data, dict) or not isinstance(data.get("packages", []), list):
+            if str(settings_path) not in unreadable:
+                unreadable.append(str(settings_path))
+            continue
+        for entry in data.get("packages", []):
+            source = (entry if isinstance(entry, str) else
+                      entry.get("source") if isinstance(entry, dict) else None)
+            if not isinstance(source, str) or not source:
+                continue
+            # A project autoload:false entry filters a personal package; it
+            # does not replace it. Other resource filters need Pi's resolver.
+            if isinstance(entry, dict):
+                if entry.get("autoload") is False:
+                    if scope == "project" and "skills" in entry:
+                        unreadable.append(str(settings_path))
+                    continue
+                if entry.get("skills") not in (None, []):
+                    unreadable.append(str(settings_path))
+                    continue
+            # Installed npm/git package resolution is intentionally left to
+            # their managed stores; local paths are exact and require no guess.
+            if source.startswith(("npm:", "git:", "http:", "https:")):
+                continue
+            candidate = Path(source).expanduser()
+            if not candidate.is_absolute():
+                candidate = settings_path.parent / candidate
+            try:
+                package_root = candidate.resolve()
+            except OSError:
+                continue
+            if not package_root.is_dir():
+                continue
+            manifest_path = package_root / "package.json"
+            manifest = _read_json(manifest_path, unreadable)
+            if manifest_path.exists() and not isinstance(manifest, dict):
+                continue
+            package_name = package_root.name
+            declared_roots = [package_root / "skills"]
+            if isinstance(manifest, dict):
+                if isinstance(manifest.get("name"), str):
+                    package_name = manifest["name"]
+                pi_manifest = manifest.get("pi")
+                if isinstance(pi_manifest, dict):
+                    skills = pi_manifest.get("skills", [])
+                    if not isinstance(skills, list) or any(
+                        not isinstance(item, str) or item.startswith(("+", "-"))
+                        or any(ch in item for ch in "*!?[]")
+                        for item in skills
+                    ):
+                        unreadable.append(str(manifest_path))
+                        continue
+                    declared_roots = [(package_root / item).resolve() for item in skills]
+            if isinstance(entry, dict) and entry.get("skills") == []:
+                declared_roots = []
+            plugin = InstalledPlugin(
+                harness="pi",
+                name=package_name,
+                scope=scope,
+                project_path=project_root if scope == "project" else None,
+                skills_roots=declared_roots,
+                enabled=True,
+                recursive=True,
+                evidence=settings_path,
+            )
+            # Project declaration wins for the same resolved local package.
+            by_root[package_root] = plugin
+    out.extend(by_root.values())
+    return sorted(out, key=lambda plugin: (plugin.scope, plugin.name)), unreadable
+
+
 ADAPTERS: dict[str, Callable[[Path, Path], tuple[list[InstalledPlugin], list[str]]]] = {
     "claude-code": _claude_code,
     "codex": _codex,
     "gemini-cli": _gemini_cli,
     "copilot": _copilot,
     "droid": _droid,
+    "pi": _pi,
 }
 
 # Best-known primary state path per harness, used only by the belt-and-braces
@@ -447,6 +536,7 @@ _PRIMARY_STATE_PATH: dict[str, Callable[[Path], Path]] = {
     "gemini-cli": lambda home: home / ".gemini" / "extensions" / "extension-enablement.json",
     "copilot": lambda home: home / ".copilot" / "config.json",
     "droid": lambda home: home / ".factory" / "plugins" / "installed_plugins",
+    "pi": lambda home: Path(os.environ.get("PI_CODING_AGENT_DIR", home / ".pi" / "agent")) / "settings.json",
 }
 
 

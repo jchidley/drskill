@@ -15,7 +15,7 @@ from drskill.traces.common import parse_ts, skill_md_names
 from drskill.traces.model import ExtractResult, Invocation
 
 HARNESS = "codex"
-VERSION = 3
+VERSION = 4
 
 
 def trace_root(home: Path) -> Path:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tomllib
 from functools import cache
 from importlib import resources
@@ -40,6 +41,12 @@ class HarnessDef(BaseModel):
         """(directory, scope, spec_str) triples in precedence order."""
         proj = [(project_root / s, "project", s) for s in self.project_paths]
         glob = [(home / s.removeprefix("~/"), "user", s) for s in self.global_paths]
+        if self.id == "pi" and (agent_dir := os.environ.get("PI_CODING_AGENT_DIR")):
+            glob = [
+                (Path(agent_dir).expanduser() / "skills", "user", spec)
+                if spec == "~/.pi/agent/skills" else (path, scope, spec)
+                for path, scope, spec in glob
+            ]
         if global_only:
             return glob
         if self.search_order == "global-first":
@@ -59,6 +66,10 @@ def detect_harnesses(
 ) -> list[HarnessDef]:
     found = []
     for h in load_harnesses():
+        if h.id == "pi" and (agent_dir := os.environ.get("PI_CODING_AGENT_DIR")):
+            if Path(agent_dir).expanduser().exists():
+                found.append(h)
+                continue
         for marker in h.detect:
             if marker.startswith("~/"):
                 p = home / marker.removeprefix("~/")

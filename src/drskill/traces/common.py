@@ -9,7 +9,7 @@ from drskill.text import one_line
 
 EXCERPT_LIMIT = 200
 
-_SKILL_MD = re.compile(r"([A-Za-z0-9._-]+)/SKILL\.md")
+_SKILL_MD = re.compile(r"(?<![A-Za-z0-9._${}-])([A-Za-z0-9._-]+)[\\/]SKILL\.md")
 _SINCE_DAYS = re.compile(r"(\d+)d")
 
 

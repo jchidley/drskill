@@ -38,7 +38,7 @@ def load_entry(cdir: Path, trace_path: Path) -> TraceCacheEntry | None:
     """The cached entry, or None when absent, corrupt, or stale by mtime/size."""
     p = cdir / f"{entry_key(trace_path)}.json"
     try:
-        entry = TraceCacheEntry.model_validate_json(p.read_text())
+        entry = TraceCacheEntry.model_validate_json(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     try:
@@ -55,8 +55,8 @@ def store_entry(cdir: Path, entry: TraceCacheEntry) -> None:
     try:
         cdir.mkdir(parents=True, exist_ok=True)
         p = cdir / f"{entry_key(Path(entry.trace_path))}.json"
-        p.write_text(entry.model_dump_json())
-    except OSError:
+        p.write_text(entry.model_dump_json(), encoding="utf-8")
+    except (OSError, UnicodeError):
         pass
 
 

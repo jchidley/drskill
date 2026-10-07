@@ -261,7 +261,7 @@ drskill audit browser:get_screenshot --global
 
 A few things to know about the numbers:
 
-- On Codex and Pi, a skill count comes from seeing the agent read that skill's SKILL.md file, not from an explicit invocation event. These rows carry a `~` marker and the report explains it.
+- On Codex and for Pi's automatic skill loading, a skill count comes from seeing the agent read that skill's SKILL.md file. These rows carry a `~` marker. Pi counts native `read` calls only when a matching tool result confirms success, not shell mentions of a path. Expanded `/skill:name` commands at the start of a user message count explicitly; if the same turn also reads that skill, audit counts one use and points to the command. Pi follows session-tree parent links for query and reasoning context and honors `PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` for skill and session discovery. Local Pi package directories declared in settings are scanned when their skill roots are explicit directories or conventional `skills/`; npm/git packages and complex resource filters are not resolved.
 - Codex encrypts its reasoning, so audit cannot show reasoning for Codex invocations.
 - Copilot records neither reasoning nor the structured arguments of a tool call, so its drill-downs are thinner than the other harnesses.
 - Each harness keeps traces for a different length of time, so a raw count comparison across harnesses can mislead. The cross-harness rollup at the bottom of the report ranks by invocations per week within each harness's own coverage window instead, and says so when the windows differ a lot.

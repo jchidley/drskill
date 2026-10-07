@@ -37,6 +37,16 @@ def test_store_then_load_round_trip(tmp_path):
     assert got == entry
 
 
+def test_store_handles_unicode_on_non_utf8_windows_locale(tmp_path):
+    trace = tmp_path / "t.jsonl"
+    trace.write_text("x\n")
+    cdir = cache.audit_cache_dir(tmp_path)
+    entry = _entry(trace)
+    entry.invocations[0].query = "replacement character: \ufffd"
+    cache.store_entry(cdir, entry)
+    assert cache.load_entry(cdir, trace) == entry
+
+
 def test_load_misses_on_mtime_or_size_change(tmp_path):
     trace = tmp_path / "t.jsonl"
     trace.write_text("x\n")

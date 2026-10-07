@@ -68,6 +68,18 @@ def test_search_paths_order_and_scope(tmp_path):
     assert triples[2][2] == ".pi/skills"
 
 
+def test_pi_agent_dir_override_changes_skills_and_detection(tmp_path, monkeypatch):
+    agent_dir = tmp_path / "pi-config"
+    agent_dir.mkdir()
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(agent_dir))
+    pi = get(load_harnesses(), "pi")
+    triples = pi.search_paths(tmp_path / "proj", tmp_path / "home")
+    assert triples[0] == (
+        agent_dir / "skills", "user", "~/.pi/agent/skills"
+    )
+    assert "pi" in {h.id for h in detect_harnesses(tmp_path / "proj", tmp_path / "home")}
+
+
 def test_global_only_drops_project_paths(tmp_path):
     cc = get(load_harnesses(), "claude-code")
     triples = cc.search_paths(tmp_path, tmp_path / "home", global_only=True)

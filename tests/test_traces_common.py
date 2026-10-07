@@ -27,6 +27,11 @@ def test_skill_md_names_extracts_dir_names():
     assert common.skill_md_names(text) == ["overturemaps", "plain-writing"]
 
 
+def test_skill_md_names_ignores_shell_variables():
+    text = r'$s\SKILL.md $d/SKILL.md ${skill}\SKILL.md /skills/real/SKILL.md'
+    assert common.skill_md_names(text) == ["real"]
+
+
 def test_skill_md_names_dedupes_preserving_order():
     text = "a/skills/foo/SKILL.md b/skills/foo/SKILL.md"
     assert common.skill_md_names(text) == ["foo"]
