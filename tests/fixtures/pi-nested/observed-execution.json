@@ -1,0 +1,169 @@
+{
+  "qualification": "Sanitized projections of observed Pi 1.0.4 execution metadata. Content removed; execution paths, message/call IDs, timestamps and errors replaced; durations and outcomes retained. Source snapshot hashes and original entry locators are retained in source fields. This is fixture data, not an extractor.",
+  "session": {
+    "type": "session",
+    "version": 3,
+    "id": "session-main",
+    "cwd": "/workspace",
+    "timestamp": "2026-10-07T00:00:00.000Z"
+  },
+  "cases": [
+    {
+      "id": "nested-success-and-support",
+      "source": {
+        "snapshotSha256": "d5a9fc6f84b3516d70de49db2f25ed95dade3f44c07672ed2af348baf4bc5ef4",
+        "entryId": "bf609a4d"
+      },
+      "entry": {
+        "type": "message",
+        "id": "success",
+        "parentId": null,
+        "timestamp": "2026-10-07T00:00:00.000Z",
+        "message": {
+          "role": "toolResult",
+          "toolCallId": "success/call",
+          "toolName": "codemode",
+          "content": [],
+          "isError": false,
+          "timestamp": 1791331200000,
+          "nestedCalls": {
+            "calls": [
+              {
+                "id": "success/call/1",
+                "name": "read",
+                "arguments": {
+                  "path": "/workspace/skills/implement/SKILL.md"
+                },
+                "status": "ok",
+                "durationMs": 19
+              },
+              {
+                "id": "success/call/2",
+                "name": "read",
+                "arguments": {
+                  "path": "docs/agents/issue-tracker.md"
+                },
+                "status": "ok",
+                "durationMs": 21
+              },
+              {
+                "id": "success/call/3",
+                "name": "read",
+                "arguments": {
+                  "path": "docs/agents/triage-labels.md"
+                },
+                "status": "ok",
+                "durationMs": 18
+              }
+            ],
+            "complete": true
+          }
+        }
+      },
+      "expected": {
+        "skillReads": 1,
+        "supportingReads": 2
+      }
+    },
+    {
+      "id": "success-before-outer-failure",
+      "source": {
+        "snapshotSha256": "d5a9fc6f84b3516d70de49db2f25ed95dade3f44c07672ed2af348baf4bc5ef4",
+        "entryId": "062f27db"
+      },
+      "entry": {
+        "type": "message",
+        "id": "partial",
+        "parentId": null,
+        "timestamp": "2026-10-07T00:00:00.000Z",
+        "message": {
+          "role": "toolResult",
+          "toolCallId": "partial/call",
+          "toolName": "codemode",
+          "content": [],
+          "isError": true,
+          "timestamp": 1791331200000,
+          "nestedCalls": {
+            "calls": [
+              {
+                "id": "partial/call/1",
+                "name": "read",
+                "arguments": {
+                  "path": "/workspace/issues/01.md"
+                },
+                "status": "ok",
+                "durationMs": 3
+              },
+              {
+                "id": "partial/call/2",
+                "name": "read",
+                "arguments": {
+                  "path": "/workspace/spec-missing.md"
+                },
+                "status": "error",
+                "durationMs": 6,
+                "error": "ENOENT: sanitized missing file"
+              }
+            ],
+            "complete": true
+          }
+        }
+      },
+      "expected": {
+        "successfulReads": 1,
+        "failedReads": 1,
+        "outerErrorDoesNotEraseSuccess": true
+      }
+    },
+    {
+      "id": "long-path-and-failed-read-output-discarded",
+      "source": {
+        "snapshotSha256": "d5a9fc6f84b3516d70de49db2f25ed95dade3f44c07672ed2af348baf4bc5ef4",
+        "entryId": "e01cb45b"
+      },
+      "entry": {
+        "type": "message",
+        "id": "long",
+        "parentId": null,
+        "timestamp": "2026-10-07T00:00:00.000Z",
+        "message": {
+          "role": "toolResult",
+          "toolCallId": "long/call",
+          "toolName": "codemode",
+          "content": [],
+          "isError": false,
+          "timestamp": 1791331200000,
+          "nestedCalls": {
+            "calls": [
+              {
+                "id": "long/call/1",
+                "name": "read",
+                "arguments": {
+                  "path": "/workspace/skills/implement/././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././././SKILL.md"
+                },
+                "status": "ok",
+                "durationMs": 3
+              },
+              {
+                "id": "long/call/2",
+                "name": "read",
+                "arguments": {
+                  "path": "/workspace/skills/implement/references/missing.md"
+                },
+                "status": "error",
+                "durationMs": 2,
+                "error": "ENOENT: sanitized missing file"
+              }
+            ],
+            "complete": true
+          }
+        }
+      },
+      "expected": {
+        "skillReads": 1,
+        "failedReads": 1,
+        "pathPreservedBeyondPreviewLimit": true
+      }
+    }
+  ]
+}

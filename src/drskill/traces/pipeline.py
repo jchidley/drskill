@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from drskill.traces import cache, claude_code, codex, copilot, pi
 from drskill.traces.common import munge_path
 from drskill.traces.model import Invocation
+from drskill.traces.pi_nested import extract_corpus as extract_pi_nested_corpus
 
 ADAPTERS = {
     claude_code.HARNESS: claude_code,

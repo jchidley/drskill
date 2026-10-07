@@ -436,6 +436,22 @@ def _droid(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], list[
 # Pi packages are declared in global/project settings. This adapter resolves
 # local package directories (the form used for checked-out skill suites) and
 # reads their package.json ``pi.skills`` roots or conventional ``skills/``.
+# drskill resolves only literal directory roots. Pi's own resolver expands
+# ``*``/``?`` globs and applies ``!``/``+``/``-`` filters; brace, extglob and
+# piped spellings such as ``skills/{a,b}`` or ``skills/@(a|b)`` are NOT glob
+# expanded by Pi either (they resolve to literal, usually missing, paths).
+# Rather than emit a silent missing path, this adapter reports every such
+# pattern form as unsupported via the manifest/settings ``unreadable`` channel.
+_MANIFEST_PATTERN_CHARS = frozenset("*!?[]{}()|")
+
+
+def _is_unsupported_manifest_pattern(item: str) -> bool:
+    """Whether a ``pi.skills`` manifest entry is beyond literal-dir support."""
+    return item.startswith(("+", "-")) or any(
+        ch in item for ch in _MANIFEST_PATTERN_CHARS
+    )
+
+
 def _pi(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], list[str]]:
     unreadable: list[str] = []
     agent_dir = Path(os.environ.get("PI_CODING_AGENT_DIR", home / ".pi" / "agent"))
@@ -494,8 +510,8 @@ def _pi(home: Path, project_root: Path) -> tuple[list[InstalledPlugin], list[str
                 if isinstance(pi_manifest, dict):
                     skills = pi_manifest.get("skills", [])
                     if not isinstance(skills, list) or any(
-                        not isinstance(item, str) or item.startswith(("+", "-"))
-                        or any(ch in item for ch in "*!?[]")
+                        not isinstance(item, str)
+                        or _is_unsupported_manifest_pattern(item)
                         for item in skills
                     ):
                         unreadable.append(str(manifest_path))

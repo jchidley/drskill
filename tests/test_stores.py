@@ -140,6 +140,66 @@ def test_pi_unsupported_skill_filter_is_reported_not_guessed(tmp_path):
     assert plugins == [] and unreadable == [str(settings)]
 
 
+def test_pi_settings_exact_path_filter_is_reported_not_guessed(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    package = tmp_path / "package"
+    _skill(package / "skills", "filtered")
+    settings = home / ".pi" / "agent" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"packages": [{
+        "source": str(package), "skills": ["skills"]
+    }]}), encoding="utf-8")
+    plugins, unreadable = discover_plugins("pi", home, proj)
+    assert plugins == [] and unreadable == [str(settings)]
+
+
+def test_pi_project_autoload_false_delta_is_reported_not_resolved(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    package = tmp_path / "package"
+    _skill(package / "skills", "personal")
+    settings = proj / ".pi" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"packages": [{
+        "source": str(package), "autoload": False, "skills": ["skills"]
+    }]}), encoding="utf-8")
+    plugins, unreadable = discover_plugins("pi", home, proj)
+    assert plugins == [] and unreadable == [str(settings)]
+
+
+def test_pi_brace_manifest_pattern_is_reported_not_guessed(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    package = tmp_path / "package"
+    _skill(package / "skills", "filtered")
+    manifest = package / "package.json"
+    manifest.write_text(json.dumps({
+        "name": "pkg", "pi": {"skills": ["skills/{a,b}"]}
+    }), encoding="utf-8")
+    settings = home / ".pi" / "agent" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"packages": [str(package)]}), encoding="utf-8")
+    plugins, unreadable = discover_plugins("pi", home, proj)
+    assert plugins == [] and unreadable == [str(manifest)]
+
+
+def test_pi_extglob_manifest_pattern_is_reported_not_guessed(tmp_path):
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    package = tmp_path / "package"
+    _skill(package / "skills", "filtered")
+    manifest = package / "package.json"
+    manifest.write_text(json.dumps({
+        "name": "pkg", "pi": {"skills": ["skills/@(a|b)"]}
+    }), encoding="utf-8")
+    settings = home / ".pi" / "agent" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"packages": [str(package)]}), encoding="utf-8")
+    plugins, unreadable = discover_plugins("pi", home, proj)
+    assert plugins == [] and unreadable == [str(manifest)]
+
+
 def test_missing_state_and_unknown_harness_are_empty(tmp_path):
     home, proj = tmp_path / "home", tmp_path / "proj"
     home.mkdir(); proj.mkdir()

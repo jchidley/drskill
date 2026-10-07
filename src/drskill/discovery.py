@@ -20,13 +20,18 @@ def _walk_dirs(base: Path):
         yield Path(dirpath), dirnames, filenames
 
 
-def _find_skill_files(base: Path, recursive: bool) -> list[Path]:
+def _find_skill_files(base: Path, recursive: bool, leaf: bool = False) -> list[Path]:
     if not recursive:
         return sorted(base.glob("*/SKILL.md"))
     out = []
-    for dirpath, _dirnames, filenames in _walk_dirs(base):
+    for dirpath, dirnames, filenames in _walk_dirs(base):
         if "SKILL.md" in filenames:
             out.append(dirpath / "SKILL.md")
+            if leaf:
+                # Pi's leaf rule: a directory containing SKILL.md is a skill
+                # root, so nested example/reference SKILL.md files under it
+                # are not independent skills.
+                dirnames[:] = []
     return sorted(out)
 
 
@@ -135,7 +140,7 @@ def discover(
             if not base.is_dir():
                 order += 1
                 continue
-            for f in _find_skill_files(base, plug.recursive):
+            for f in _find_skill_files(base, plug.recursive, leaf=(plug.harness == "pi")):
                 if not f.exists():
                     continue
                 instances.append(RawInstance(

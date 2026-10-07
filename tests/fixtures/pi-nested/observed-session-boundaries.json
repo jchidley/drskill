@@ -1,0 +1,160 @@
+{
+  "qualification": "Observed metadata projections only. Execution IDs/paths/messages sanitized; source snapshot hashes and original entry locators retained in source fields. Wrapper is evidence of expanded instruction delivery, not authenticated UI provenance or task completion.",
+  "cases": [
+    {
+      "id": "explicit-expanded-wrapper",
+      "source": {
+        "snapshotSha256": "930decb62be4f184e4ed96b7d664aa8acf50e8d01a6ef71e014c4049ed66ccbd",
+        "entryId": "9cb2174d"
+      },
+      "entry": {
+        "type": "message",
+        "id": "explicit",
+        "parentId": null,
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "<skill name=\"example\" location=\"/workspace/skills/example/SKILL.md\">\nReferences are relative to /workspace/skills/example.\n\n[REDACTED INSTRUCTIONS]\n</skill>"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "explicitInstructionDeliveries": 1,
+        "readToolEvents": 0
+      }
+    },
+    {
+      "id": "fork-inherited-result",
+      "source": {
+        "childSnapshotSha256": "930decb62be4f184e4ed96b7d664aa8acf50e8d01a6ef71e014c4049ed66ccbd",
+        "parentSnapshotSha256": "30e967e4159d920de62908e812757d1b4b0404d2d2b074b3977e15aca90574ec",
+        "entryId": "fdd6235d"
+      },
+      "headers": [
+        {
+          "type": "session",
+          "id": "session-parent",
+          "cwd": "/workspace"
+        },
+        {
+          "type": "session",
+          "id": "session-fork",
+          "cwd": "/workspace",
+          "parentSession": "/private/session-parent.jsonl"
+        }
+      ],
+      "occurrences": [
+        {
+          "sessionId": "session-parent",
+          "entry": {
+            "type": "message",
+            "id": "inherited-result",
+            "parentId": null,
+            "timestamp": "2026-10-07T00:00:00.000Z",
+            "message": {
+              "role": "toolResult",
+              "toolCallId": "ancestor-call",
+              "toolName": "codemode",
+              "content": [],
+              "isError": false,
+              "timestamp": 1791331200000,
+              "nestedCalls": {
+                "calls": [
+                  {
+                    "id": "ancestor-call/1",
+                    "name": "read",
+                    "arguments": {
+                      "path": "/workspace/skills/example/SKILL.md"
+                    },
+                    "status": "ok"
+                  }
+                ],
+                "complete": true
+              }
+            }
+          }
+        },
+        {
+          "sessionId": "session-fork",
+          "entry": {
+            "type": "message",
+            "id": "inherited-result",
+            "parentId": null,
+            "timestamp": "2026-10-07T00:00:00.000Z",
+            "message": {
+              "role": "toolResult",
+              "toolCallId": "ancestor-call",
+              "toolName": "codemode",
+              "content": [],
+              "isError": false,
+              "timestamp": 1791331200000,
+              "nestedCalls": {
+                "calls": [
+                  {
+                    "id": "ancestor-call/1",
+                    "name": "read",
+                    "arguments": {
+                      "path": "/workspace/skills/example/SKILL.md"
+                    },
+                    "status": "ok"
+                  }
+                ],
+                "complete": true
+              }
+            }
+          }
+        }
+      ],
+      "expected": {
+        "physicalOccurrences": 2,
+        "distinctExecutions": 1,
+        "requiresParentPayloadComparison": true
+      }
+    },
+    {
+      "id": "standalone-subagent-read",
+      "source": {
+        "snapshotSha256": "812f823bf778805325bdc8629d6dcacbb6dab5f767df794ab293137636db2a53",
+        "entryId": "48d9cf12"
+      },
+      "header": {
+        "type": "session",
+        "id": "session-child",
+        "cwd": "/workspace"
+      },
+      "entry": {
+        "type": "message",
+        "id": "child-result",
+        "parentId": null,
+        "message": {
+          "role": "toolResult",
+          "toolName": "codemode",
+          "toolCallId": "child-call",
+          "content": [],
+          "isError": false,
+          "nestedCalls": {
+            "calls": [
+              {
+                "id": "child-call/1",
+                "name": "read",
+                "arguments": {
+                  "path": "/workspace/issues/01.md"
+                },
+                "status": "ok"
+              }
+            ],
+            "complete": true
+          }
+        }
+      },
+      "expected": {
+        "successfulReads": 1,
+        "inheritedExecutions": 0,
+        "parentToolAcknowledgementAloneInsufficient": true
+      }
+    }
+  ]
+}

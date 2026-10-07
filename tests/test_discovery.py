@@ -82,6 +82,27 @@ def test_pi_root_md_only_in_native_dirs(tmp_path):
     assert [i.skill_file.name for i in instances] == ["note.md"]
 
 
+def test_pi_package_discovery_stops_at_skill_leaf(tmp_path):
+    from drskill.harnesses import load_harnesses
+    from drskill.discovery import discover
+
+    h = next(x for x in load_harnesses() if x.id == "pi")
+    home, proj = tmp_path / "home", tmp_path / "proj"
+    proj.mkdir()
+    package = tmp_path / "package"
+    write_skill(package / "skills", "top")
+    write_skill(package / "skills" / "top", "examples")  # nested leaf: pruned
+    write_skill(package / "skills" / "group", "subskill")  # not under a skill root
+    (package / "package.json").write_text(json.dumps({"name": "pkg"}), encoding="utf-8")
+    settings = home / ".pi" / "agent" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"packages": [str(package)]}), encoding="utf-8")
+    instances, _broken, unreadable = discover(h, proj, home)
+    assert unreadable == []
+    names = {i.skill_file.parent.name for i in instances if i.plugin is not None}
+    assert names == {"top", "subskill"}
+
+
 def test_global_only(tree):
     proj, home = tree
     instances, _, _u = discover(get("claude-code"), proj, home, global_only=True)

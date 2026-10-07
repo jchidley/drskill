@@ -14,10 +14,11 @@ import re
 from pathlib import Path
 
 from drskill.traces.common import excerpt, parse_ts, skill_md_names
-from drskill.traces.model import ExtractResult, Invocation
+from drskill.traces.model import Invocation
+from drskill.traces.pi_nested import PiExtractResult, extract_nested
 
 HARNESS = "pi"
-VERSION = 8
+VERSION = 9
 
 _SKILL_BLOCK = re.compile(r'^\s*<skill\s+name=["\']([^"\']+)["\'](?:\s|>)')
 
@@ -38,6 +39,11 @@ def discover(home: Path) -> list[Path]:
     if not root.is_dir():
         return []
     return sorted(root.glob("*/*.jsonl"))
+
+
+def _message(event: dict) -> dict:
+    message = event.get("message")
+    return message if isinstance(message, dict) else {}
 
 
 def _text(content: object) -> str | None:
@@ -77,7 +83,7 @@ def _thinking(content: object) -> str | None:
     return latest
 
 
-def extract(path: Path) -> ExtractResult:
+def extract(path: Path) -> PiExtractResult:
     out: list[Invocation] = []
     recognized = 0
     session_id = path.stem
@@ -117,7 +123,7 @@ def extract(path: Path) -> ExtractResult:
 
         if event.get("type") != "message":
             continue
-        message = event.get("message") or {}
+        message = _message(event)
         if message.get("role") == "toolResult" and message.get("isError") is False:
             tool_call_id = message.get("toolCallId")
             if isinstance(tool_call_id, str):
@@ -143,7 +149,7 @@ def extract(path: Path) -> ExtractResult:
     for event, _lineno, entry_id, _parent_id in records:
         if event.get("type") != "message":
             continue
-        message = event.get("message") or {}
+        message = _message(event)
         if message.get("role") != "user":
             continue
         text = _text(message.get("content"))
@@ -154,7 +160,7 @@ def extract(path: Path) -> ExtractResult:
     for event, lineno, _entry_id, parent_id in records:
         if event.get("type") != "message":
             continue
-        message = event.get("message") or {}
+        message = _message(event)
         role = message.get("role")
         content = message.get("content")
         ts = parse_ts(event.get("timestamp"))
@@ -187,7 +193,7 @@ def extract(path: Path) -> ExtractResult:
         saw_user = False
         prior_thinking = None
         for ancestor in ancestors(parent_id):
-            ancestor_message = ancestor.get("message") or {}
+            ancestor_message = _message(ancestor)
             ancestor_role = ancestor_message.get("role")
             if not saw_user and ancestor_role == "user":
                 saw_user = True
@@ -242,4 +248,7 @@ def extract(path: Path) -> ExtractResult:
                         reasoning=excerpt(current_thinking),
                         detection="skill-read",
                     ))
-    return ExtractResult(invocations=out, recognized=recognized)
+    result = extract_nested(path)
+    result.invocations = out
+    result.recognized = recognized
+    return result
