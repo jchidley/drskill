@@ -153,7 +153,8 @@ branch `local/pi-support`, clean at start.
   Initial local output: `/tmp/drskill-ticket02-pytest.log`.
 - Re-ran the full suite after the inherited-path fix and snapshot refactor:
   **1193 passed, the same 7 failed** for missing optional dependencies.
-  Final local output: `/tmp/drskill-ticket02-pytest-final.log`.
+- Final full suite after the shared live-file snapshot fix: **1194 passed,
+  the same 7 failed**. Final local output: `/tmp/drskill-ticket02-pytest-final.log`.
 - `uv run python scripts/pi_nested_demo.py`: expected 9 occurrences / 8 resolved
   executions / 1 inherited / 0 unresolved; output inspected.
 - `uv run python -m compileall -q` on changed trace modules and demo: passed.
@@ -164,9 +165,9 @@ branch `local/pi-support`, clean at start.
   incomplete (1184 passed / 13 failed, including six in-progress import errors).
   The final parent run above supersedes that intermediate result.
 
-Ticket completion must be recorded in a separate agent-skills-root session;
-this drskill commit does not edit the coordinator ticket or unblock ticket 03
-by itself.
+Ticket completion is recorded separately in an agent-skills-root session;
+the drskill commits do not edit the coordinator ticket. Ticket 03 owns subsequent
+user-facing integration and consumes this verified extraction handoff.
 
 ## Review follow-up
 
@@ -192,6 +193,12 @@ reviewer independently verified both fixes in `3a32e48` / `8824650`.
 The remaining minor concern (native and nested detectors reading a live file
 separately) was reproduced by a filesystem-boundary regression and corrected:
 both now consume the same bytes. Focused tests after that fix: **126 passed**.
+The Spec reviewer independently verified `3aa9279`, ran the 126 focused tests
+and demonstration, and confirmed all three concerns resolved. Both axes used
+fresh standalone DeepSeek sessions (a different family from the authoring model).
+Final review totals: Standards four initial judgement-call findings, zero
+unresolved; Spec two material findings plus one minor concern, zero unresolved.
+Implementation commits: `1ca77f1`, `3a32e48`, `8824650`, `3aa9279`.
 
 ## Source evidence and historical qualification
 
