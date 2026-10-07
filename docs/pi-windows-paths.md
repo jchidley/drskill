@@ -171,8 +171,9 @@ Final validation after all behavior commits, from the drskill root:
   still reports 9 occurrences / 8 executions / 1 inherited / 0 unresolved,
   5 skill reads and 4 combined observations, now extraction 12 / report 3.
 - Retained 801-file Windows re-audit above was run at `c3abd7f`. The subsequent
-  device-cwd guard and UNC share-root fix do not change its ordinary drive-qualified
-  request paths (independently verified **77/77** baseline requests are drive-absolute).
+  device-cwd guard and UNC share-root fix do not change its paths: independently
+  verified **51** requests are drive-absolute and **26** are relative; all **77**
+  have drive-absolute cwd, with **0** UNC requests or device cwds.
   Focused regressions and the final suite cover both corrections. The corpus
   was not needlessly reread after corrections unrelated to its paths.
 
