@@ -70,7 +70,9 @@ merge. Missing/conflicting ancestry remains unresolved, excluded from distinct
 execution and combined-use counts rather than counted as definitely new.
 Native details retain the successful result locator as well as the call locator.
 Native read executions and expanded delivery observations also retain verified
-owners. Fork copies require matching source-call/delivery and result payloads;
+owners. `native_read_occurrences` and `native_distinct_read_executions` count
+reads only; `native_unresolved_occurrences` counts both unresolved native reads
+and delivery observations, matching the explicit human label. Fork copies require matching source-call/delivery and result payloads;
 they retain physical rows without inflating combined uses. New child read results
 remain distinct, and missing/conflicting ancestry is unresolved.
 
@@ -115,6 +117,7 @@ Human summary (temporary source paths vary):
 ```text
 Evidence scope: all-retained-branches
 Instruction deliveries: 0 · skill-file reads: 5 · declared supporting reads: 0
+Native reads: 0 physical occurrences · 0 distinct executions · 0 unresolved native/delivery observations
 Nested reads: 9 physical occurrences · 8 distinct executions · 1 inherited · 0 unresolved
 Combined observed uses: 4 (not workflow completion)
 Coverage: Pi read coverage is unknown outside retained records ...
@@ -127,6 +130,9 @@ Machine summary:
   "instruction_deliveries": 0,
   "skill_file_reads": 5,
   "supporting_reads": 0,
+  "native_read_occurrences": 0,
+  "native_distinct_read_executions": 0,
+  "native_unresolved_occurrences": 0,
   "nested_read_occurrences": 9,
   "nested_distinct_executions": 8,
   "nested_inherited_occurrences": 1,
@@ -142,6 +148,108 @@ CLI regression adds an explicitly synthetic declared wrapper and verifies
 both wrapper and read locators. Do not relabel missing observed declarations
 as established relationships.
 
-Validation, review dispositions and implementation commits are recorded below
-after the final gates. Ticket 04 can use these commands/examples but still needs
-owner/coordinator verification before its prerequisite is closed.
+Ticket 04 can use these commands/examples but still needs owner/coordinator
+verification before its prerequisite is closed.
+
+## Validation and implementation handoff
+
+Implementation commits on `local/pi-support`, reviewed against
+`57ac64f0bb9fbccde6381c97411370804a1b661c`:
+
+- `7698413`: initial evidence-aware audit integration.
+- `0646f9f`: review corrections, shared path/combined policy, and verified
+  inherited native/delivery ownership. Pi extraction version is now **11**;
+  audit cache schema and evidence report versions remain **2**.
+
+Validation from `/home/jack/git/drskill`:
+
+- Final focused trace adapters, cache, pipeline, reports and audit CLI:
+  `uv run pytest tests/test_traces_*.py tests/test_cli_audit.py -q` — **189 passed**.
+- After the strict selected-branch ancestry metadata adjustment,
+  `uv run pytest tests/test_traces_audit_evidence.py -q` — **15 passed**;
+  the subsequent full-suite run includes this change.
+- Final parent `uv run pytest` — **1223 passed, 7 failed**. All seven failures
+  are the previously recorded unavailable optional dependencies: two deep tests
+  import missing `litellm`; five MCP-connect tests import missing `mcp`.
+  No extras were installed. This is **not a green full-suite gate**.
+  Local log: `/tmp/drskill-ticket03-pytest-final.log`.
+- The native implementation child also ran an intermediate full suite before
+  final integration: 1209 passed / the same 7 optional-dependency failures.
+  The final parent run above supersedes that result.
+- `uv run python scripts/pi_audit_demo.py` and `--json`: verified expected
+  9 occurrences / 8 executions / 1 inherited / 0 unresolved; all nine rows
+  preserve sanitized fixture provenance. Supporting-looking observed paths
+  remain unattributed without retained declarations.
+- Original extraction demo remains 9/8/1/0.
+- `uv run python -m compileall -q src/drskill/traces src/drskill/cli.py scripts/pi_audit_demo.py`
+  and `git diff --check`: passed.
+- `pyproject.toml` declares pytest but no typechecking or lint gate. Syntax
+  compilation is not claimed as typechecking.
+
+Representative local outputs are `/tmp/drskill-ticket03-demo.json` and
+`/tmp/drskill-ticket03-demo.txt`. The sanitized examples and exact commands
+above are the durable handoff; temporary paths are not stable source identifiers.
+No raw private sessions, instruction bodies or secrets were copied, and no
+upstream code or skills were executed or modified.
+
+## Two-axis review
+
+Initial **Standards** review of `7698413` reported two behavior concerns and
+four minor concerns. The non-Pi combined-count inflation and broadened non-Pi
+unused gate were fixed with public regressions. Path normalization and combined
+hashing now share policy helpers; native branch checks share an ancestry walker.
+The remaining nested turn and selected-branch walkers have different contracts
+(raw links only versus legacy native linear context). Summary no longer mutates
+input; classification happens in the pipeline. Named drilldown diagnostics are
+explicitly labelled report-wide coverage context, not attributed to a skill.
+
+Initial **Spec** review found no material bugs or scope creep and five minor
+concerns. Corrected the non-Pi gate and human Pi header (now “evidence rows”,
+not “invocations”); filled in this validation handoff. Retained the deliberately
+qualified recorded-path resource labels and project-scope diagnostic filtering:
+neither authenticates historical resource membership or claims whole-workflow
+coverage.
+
+Parent follow-up regressions additionally found and fixed forked delivery/native
+combined inflation and duplicate call IDs across tool names. Removed-parent,
+relative-file, untimed-window, no-session-reread and duplicate-ancestor cache
+regressions pass. Fresh follow-up Standards and Spec reviews of `0646f9f` independently verified
+the changes; both used standalone DeepSeek sessions, a different model family
+from the parent authoring model.
+
+### Standards follow-up
+
+All seven reviewed prior concerns (including the parent-discovered fork count
+bug) were verified resolved. The reviewer independently ran 23 audit/cache tests
+and 31 native-Pi tests. Three non-blocking residuals were reported:
+
+- Mixed-run unreadable trace coverage remains conservative. Every mixed report
+  with Pi already has unknown whole-workflow coverage; this does not change the
+  non-Pi-only behavior covered by its CLI regression.
+- A partially matching pair of native source/result IDs yields unresolved
+  ownership with a conflict diagnostic. This is intentionally conservative,
+  not a claim that a new execution was established.
+- A redundant version assignment was removed after review; 33 public
+  pipeline/audit regressions and syntax/whitespace checks passed. The full suite
+  above predates only this redundant-assignment removal and documentation edits;
+  it was not rerun for those non-behavioral changes.
+
+Standards disposition: prior concerns resolved, two conservative edge cases
+retained with explicit qualification, no blocking findings.
+
+### Spec follow-up
+
+No material missing requirement, wrong implementation or scope creep. The
+reviewer independently ran 54 audit/cache/native tests and verified ancestry,
+whole-message payload checks, fork combined counts, removed-parent unknown
+ownership, cross-tool duplicate identities and no-session-reread cache behavior.
+Two non-blocking residuals: the sample omitted newly added native counts (now
+corrected above), and the machine unresolved counter spans both native reads
+and delivery observations (now explicitly documented alongside its human label).
+
+Spec disposition: prior concerns resolved, sample drift corrected, count
+semantics explicitly qualified, no blocking findings.
+
+Coordinator closure is not performed from this drskill session. Start a separate
+Pi session at `/home/jack/git/agent-skills` to record the drskill commit and test
+handoff in ticket 03 and independently verify ticket 04 readiness.

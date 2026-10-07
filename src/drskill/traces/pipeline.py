@@ -87,7 +87,6 @@ def run_audit(
             if entry.recognized == 0 and entry.size > 0:
                 data.drifted[adapter.HARNESS] = data.drifted.get(adapter.HARNESS, 0) + 1
             data.inspected_files.append(str(trace))
-            data.extraction_versions[adapter.HARNESS] = adapter.VERSION
             data.invocations.extend(entry.invocations)
             if entry.pi_evidence is not None:
                 pi_snapshots[str(trace)] = entry.pi_evidence
