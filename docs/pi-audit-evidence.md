@@ -1,5 +1,9 @@
 # Pi evidence-aware audit (ticket 03)
 
+For the current explicit multi-file corpus, time policy and version contract,
+see [Windows-and-WSL audit](pi-cross-os-audit.md). The validation below is the
+historical ticket 03 handoff.
+
 Ticket 02's verified handoff in [pi-nested-extraction.md](pi-nested-extraction.md)
 satisfies the prerequisite; ticket 03's coordinator wording saying “not yet
 complete” is stale. This implementation starts from clean `57ac64f` on the
@@ -84,7 +88,8 @@ immutable historical resource identity, full-file coverage or exact call time.
 
 ## Cache and coverage
 
-Current Pi adapter version **12**, audit cache schema **2**, evidence report version **3**.
+Ticket 01 follow-up baseline: Pi adapter **12**, audit cache schema **2**, evidence report **3**.
+The current contract is documented in [pi-cross-os-audit.md](pi-cross-os-audit.md).
 [Windows path normalization](pi-windows-paths.md) extends the recorded lexical
 namespace without mapping Windows resources or ancestry to WSL. The validation
 and review below are the historical ticket 03 baseline (extraction 11/report 2).

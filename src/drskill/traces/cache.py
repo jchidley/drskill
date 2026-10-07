@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from drskill.traces.model import Invocation
 from drskill.traces.pi_nested import PiExtractResult
 
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 
 class TraceCacheEntry(BaseModel):

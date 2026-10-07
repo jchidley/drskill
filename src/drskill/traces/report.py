@@ -13,7 +13,7 @@ from rich.table import Table
 from drskill.report import _sanitize
 from drskill.text import one_line
 from drskill.traces.model import Invocation
-from drskill.traces.pipeline import AuditData
+from drskill.traces.pipeline import AuditData, observation_time
 
 MIN_SPAN_DAYS = 7.0
 HEURISTIC_LEGEND = "~ observed delivery or SKILL.md reads, not authenticated invocation intent"
@@ -23,10 +23,11 @@ class NameStats(BaseModel):
     kind: str
     name: str
     server: str | None = None
+    resource: str = ""
     count: int = 0  # main-thread uses
     sidechain: int = 0
     sessions: int = 0
-    last_used: dt.datetime
+    last_used: dt.datetime | None
     heuristic: bool = False
 
 
@@ -43,8 +44,11 @@ class Coverage(BaseModel):
         return max(span, MIN_SPAN_DAYS)
 
 
-def _key(inv: Invocation) -> tuple[str, str, str | None]:
-    return (inv.kind, inv.name, inv.server)
+def _key(inv: Invocation) -> tuple:
+    resource = ""
+    if inv.harness == "pi" and inv.evidence_kind:
+        resource = inv.resolved_path or f"unknown:{inv.source_file}:{inv.entry_id}"
+    return (inv.kind, inv.name, inv.server, resource)
 
 
 def aggregate(invocations: list[Invocation]) -> dict[str, list[NameStats]]:
@@ -54,16 +58,16 @@ def aggregate(invocations: list[Invocation]) -> dict[str, list[NameStats]]:
     out: dict[str, list[NameStats]] = {}
     for harness, names in grouped.items():
         stats = []
-        for (kind, name, server), invs in names.items():
+        for (kind, name, server, resource), invs in names.items():
             stats.append(NameStats(
-                kind=kind, name=name, server=server,
+                kind=kind, name=name, server=server, resource=resource,
                 count=len({i.combined_use_id or i.evidence_owner or ("row", n)
                            for n, i in enumerate(invs)
                            if not i.sidechain and i.evidence_kind != "supporting-read"
                            and i.inheritance != "unresolved"}),
                 sidechain=sum(1 for i in invs if i.sidechain),
                 sessions=len({i.session_id for i in invs}),
-                last_used=max(i.timestamp for i in invs),
+                last_used=max((observation_time(i) for i in invs if observation_time(i) is not None), default=None),
                 heuristic=any(i.detection != "explicit" for i in invs),
             ))
         stats.sort(key=lambda s: (-s.count, s.name))
@@ -74,12 +78,13 @@ def aggregate(invocations: list[Invocation]) -> dict[str, list[NameStats]]:
 def coverage(invocations: list[Invocation]) -> dict[str, Coverage]:
     grouped: dict[str, list[Invocation]] = defaultdict(list)
     for inv in invocations:
-        grouped[inv.harness].append(inv)
+        if observation_time(inv) is not None:
+            grouped[inv.harness].append(inv)
     return {
         harness: Coverage(
             harness=harness,
-            first=min(i.timestamp for i in invs),
-            last=max(i.timestamp for i in invs),
+            first=min(observation_time(i) for i in invs),
+            last=max(observation_time(i) for i in invs),
             sessions=len({i.session_id for i in invs}),
             invocations=len(invs),
         )
@@ -93,9 +98,9 @@ def rollup(invocations: list[Invocation]) -> list[tuple[NameStats, float]]:
     merged: dict[tuple, NameStats] = {}
     rates: dict[tuple, float] = defaultdict(float)
     for harness, stats in per_harness.items():
-        weeks = cov[harness].span_days / 7.0
+        weeks = cov[harness].span_days / 7.0 if harness in cov else 1.0
         for s in stats:
-            key = (s.kind, s.name, s.server)
+            key = (s.kind, s.name, s.server, s.resource)
             rates[key] += s.count / weeks
             if key in merged:
                 m = merged[key]
@@ -103,7 +108,7 @@ def rollup(invocations: list[Invocation]) -> list[tuple[NameStats, float]]:
                     "count": m.count + s.count,
                     "sidechain": m.sidechain + s.sidechain,
                     "sessions": m.sessions + s.sessions,
-                    "last_used": max(m.last_used, s.last_used),
+                    "last_used": max((t for t in (m.last_used, s.last_used) if t is not None), default=None),
                     "heuristic": m.heuristic or s.heuristic,
                 })
             else:
@@ -142,36 +147,41 @@ def render_audit(console: Console, data: AuditData) -> None:
     cov = coverage(data.invocations)
     any_heuristic = False
     for harness in sorted(per_harness):
-        c = cov[harness]
-        console.print(
-            f"\n[bold]{_clean(harness)}[/bold]  coverage: "
-            f"{c.first.date().isoformat()} to {c.last.date().isoformat()} · "
-            f"{c.sessions} session{'s' if c.sessions != 1 else ''} · "
-            f"{c.invocations} " + ("evidence rows" if harness == "pi" else
-                                  f"invocation{'s' if c.invocations != 1 else ''}")
-        )
+        c = cov.get(harness)
+        if c is not None:
+            console.print(
+                f"\n[bold]{_clean(harness)}[/bold]  coverage: displayed timed activity "
+                f"{c.first.date().isoformat()} to {c.last.date().isoformat()} · "
+                f"{c.sessions} sessions · {c.invocations} timed rows")
+        else:
+            console.print(f"\n[bold]{_clean(harness)}[/bold]  coverage: displayed timed activity unknown")
         table = Table(show_edge=False, pad_edge=False)
         for col in ("name", "kind", "server", "uses", "share", "sessions", "last used"):
             table.add_column(col)
+        if harness == "pi":
+            table.add_column("recorded resource (not installation identity)")
         total_main = sum(s.count for s in per_harness[harness]) or 1
         for s in per_harness[harness]:
             marker = " ~" if s.heuristic else ""
             any_heuristic = any_heuristic or s.heuristic
-            table.add_row(
+            cells = [
                 _clean(s.name) + marker,
                 s.kind.replace("mcp_tool", "tool"),
                 _clean(s.server or ""),
                 _uses_cell(s),
                 f"{100 * s.count / total_main:.0f}%",
                 str(s.sessions),
-                s.last_used.date().isoformat(),
-            )
+                s.last_used.date().isoformat() if s.last_used else "unknown",
+            ]
+            if harness == "pi":
+                cells.append(_clean(s.resource))
+            table.add_row(*cells)
         console.print(table)
     if any_heuristic:
         console.print(f"[dim]{HEURISTIC_LEGEND}[/dim]")
     if len(per_harness) > 1:
-        spans = {h: cov[h].span_days for h in per_harness}
-        if max(spans.values()) / min(spans.values()) > 2:
+        spans = {h: cov[h].span_days for h in per_harness if h in cov}
+        if spans and max(spans.values()) / min(spans.values()) > 2:
             parts = ", ".join(f"{_clean(h)} {spans[h]:.0f}d" for h in sorted(spans))
             console.print(
                 f"[dim]windows differ ({parts}); ranks compare rates, "
@@ -186,7 +196,7 @@ def render_audit(console: Console, data: AuditData) -> None:
             table.add_row(_clean(s.name) + marker,
                           s.kind.replace("mcp_tool", "tool"),
                           _uses_cell(s), f"{rate:.1f}",
-                          s.last_used.date().isoformat())
+                          s.last_used.date().isoformat() if s.last_used else "unknown")
         console.print(table)
     if not data.invocations:
         if data.nested_reads:
@@ -230,16 +240,19 @@ def render_drilldown(console: Console, name: str, data: AuditData) -> None:
     groups: dict[tuple, list[Invocation]] = defaultdict(list)
     for inv in hits:
         groups[_key(inv)].append(inv)
-    for (kind, gname, server), invs in sorted(groups.items()):
+    for (kind, gname, server, resource), invs in sorted(groups.items()):
         label = f"{gname} ({kind.replace('mcp_tool', 'MCP tool')}"
         label += f", server {server})" if server else ")"
+        if resource:
+            label += f" · {resource}"
         by_harness = defaultdict(int)
         for i in invs:
             by_harness[i.harness] += 1
         counts = ", ".join(f"{_clean(h)} {n}" for h, n in sorted(by_harness.items()))
         console.print(f"\n[bold]{_clean(label)}[/bold]  {counts}")
-        for inv in sorted(invs, key=lambda i: i.timestamp, reverse=True):
-            when = inv.timestamp.strftime("%Y-%m-%d %H:%M")
+        for inv in sorted(invs, key=lambda i: (i.timestamp is not None, i.timestamp or dt.datetime.min), reverse=True):
+            time = observation_time(inv)
+            when = time.strftime("%Y-%m-%d %H:%M") if time else "unknown time"
             where = inv.project or "unknown project"
             side = "  [dim](subagent)[/dim]" if inv.sidechain else ""
             console.print(f"  {when}  {_clean(inv.harness)}  {_clean(where)}{side}")
@@ -275,6 +288,31 @@ def render_evidence(console: Console, data: AuditData, name: str | None = None) 
     if data.extraction_versions.get("pi") is None and not data.nested_reads:
         return
     console.print(f"\nEvidence scope: {_clean(data.evidence_scope)}")
+    if data.window:
+        console.print(f"Window: [{_clean(data.window.get('since') or 'unbounded')}, "
+                      f"{_clean(data.window.get('until') or 'unbounded')}) UTC · untimed membership unknown")
+    from drskill.traces.evidence import source_summaries
+    for path, source_counts in source_summaries(selected).items():
+        source = data.sources.get(path, {})
+        console.print(f"Source: {_clean(path)} · namespace {_clean(source.get('path_namespace', 'unknown'))} · "
+                      f"recorded OS {_clean(str(source.get('recorded_os') or 'unknown'))}")
+        console.print(f"  inspected records: {source.get('inspected_records', 'unknown')} · "
+                      f"inspected: {source.get('inspected_invocations', 'unknown')} direct rows / "
+                      f"{source.get('inspected_nested_reads', 'unknown')} nested reads; "
+                      f"displayed: {source_counts['instruction_deliveries']} deliveries / "
+                      f"{source_counts['skill_file_reads']} skill reads / "
+                      f"{source_counts['supporting_reads']} supporting / "
+                      f"{source_counts['unattributed_reads']} unattributed · "
+                      f"{source_counts['combined_observed_uses']} qualified combined observations")
+        console.print(f"  nested ownership: {source_counts['nested_inherited_occurrences']} inherited / "
+                      f"{source_counts['nested_unresolved_occurrences']} unresolved")
+        if source.get("recorded_location"):
+            console.print(f"  declared recorded source: {_clean(source['recorded_location'])}")
+    if data.sources:
+        console.print("Recorded resources are not joined to current inventory; paths and current byte equality "
+                      "do not authenticate historical installations or versions.")
+        console.print("Per-source distinct counts overlap inherited owners; aggregate is reconciled, not their sum. "
+                      "Storage location does not establish execution OS.")
     console.print(f"Evidence versions: report {REPORT_VERSION} · "
                   f"Pi extraction {data.extraction_versions.get('pi', 'unknown')} · cache schema {CACHE_VERSION}")
     console.print("Path matching: lexical recorded namespace, case-sensitive; Windows "
@@ -282,7 +320,8 @@ def render_evidence(console: Console, data: AuditData, name: str | None = None) 
     console.print(
         f"Instruction deliveries: {counts['instruction_deliveries']} · "
         f"skill-file reads: {counts['skill_file_reads']} · "
-        f"declared supporting reads: {counts['supporting_reads']}"
+        f"declared supporting reads: {counts['supporting_reads']} · "
+        f"unattributed reads: {counts['unattributed_reads']}"
     )
     console.print(
         f"Native reads: {counts['native_read_occurrences']} physical occurrences · "
@@ -296,6 +335,10 @@ def render_evidence(console: Console, data: AuditData, name: str | None = None) 
         f"{counts['nested_unresolved_occurrences']} unresolved"
     )
     console.print(f"Combined observed uses: {counts['combined_observed_uses']} (not workflow completion)")
+    console.print(f"Unknown window membership: {counts['untimed_invocations']} direct rows / "
+                  f"{counts['untimed_nested_reads']} nested reads")
+    console.print("Inspected source records and displayed activity are separate; untimed rows "
+                  "are retained, not certified inside the window.")
     for row in selected.nested_reads:
         console.print(f"  {_clean(row.skill_name or 'unattributed read')} · "
                       f"{_clean(row.evidence_kind or 'unattributed')} · {_clean(row.inheritance)}")

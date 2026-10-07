@@ -36,8 +36,18 @@ def parse_since(spec: str, now: dt.datetime) -> dt.datetime:
     m = _SINCE_DAYS.fullmatch(spec)
     if m:
         return now - dt.timedelta(days=int(m.group(1)))
-    d = dt.date.fromisoformat(spec)
-    return dt.datetime(d.year, d.month, d.day, tzinfo=dt.timezone.utc)
+    return parse_boundary(spec)
+
+
+def parse_boundary(spec: str) -> dt.datetime:
+    """Absolute ISO date or explicitly timezone-qualified UTC timestamp."""
+    if len(spec) == 10:
+        d = dt.date.fromisoformat(spec)
+        return dt.datetime(d.year, d.month, d.day, tzinfo=dt.timezone.utc)
+    value = dt.datetime.fromisoformat(spec)
+    if value.tzinfo is None or value.utcoffset() != dt.timedelta(0):
+        raise ValueError("Boundary must be UTC")
+    return value.astimezone(dt.timezone.utc)
 
 
 def parse_ts(value: object) -> dt.datetime | None:

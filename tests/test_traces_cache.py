@@ -100,5 +100,6 @@ def test_query_and_reasoning_are_the_only_trace_text_stored(tmp_path):
                "source_file", "source_line", "evidence_kind", "entry_id",
                "parent_id", "turn_id", "requested_path", "resolved_path",
                "result_entry_id", "result_source_line", "combined_use_id",
-               "qualifications", "declared_supporting_paths", "evidence_owner", "inheritance"}
+               "qualifications", "declared_supporting_paths", "evidence_owner", "inheritance",
+               "window_membership", "result_record_time", "tool_call_id"}
     assert set(raw["invocations"][0]) <= allowed

@@ -12,7 +12,7 @@ class Invocation(BaseModel):
     harness: str  # claude-code | codex | pi | copilot
     session_id: str
     project: str | None = None  # cwd from trace metadata, None if unknowable
-    timestamp: dt.datetime
+    timestamp: dt.datetime | None
     kind: Literal["skill", "mcp_tool"]
     name: str
     server: str | None = None  # MCP server, only when kind == "mcp_tool"
@@ -40,6 +40,9 @@ class Invocation(BaseModel):
     evidence_owner: tuple[str, str, str] | None = None
     inheritance: Literal["unresolved", "independent", "inherited"] | None = None
     declared_supporting_paths: list[str] = Field(default_factory=list)
+    tool_call_id: str | None = None
+    result_record_time: str | None = None
+    window_membership: Literal["inside", "unknown"] = "unknown"
 
 
 class ExtractResult(BaseModel):

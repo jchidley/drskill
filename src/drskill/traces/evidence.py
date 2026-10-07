@@ -4,10 +4,10 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import PurePosixPath
 
-from drskill.traces.pipeline import AuditData
+from drskill.traces.pipeline import AuditData, observation_time
 from drskill.traces.common import combined_use_id
 
-REPORT_VERSION = 3
+REPORT_VERSION = 4
 
 
 def classify_reads(data: AuditData) -> None:
@@ -40,6 +40,14 @@ def classify_reads(data: AuditData) -> None:
                 row.qualifications.append(qualification)
 
 
+def source_summaries(data: AuditData) -> dict[str, dict]:
+    """Physical source totals; per-source distinct sets need not sum to aggregate."""
+    return {path: summary(data.model_copy(update={
+        "invocations": [i for i in data.invocations if i.source_file == path],
+        "nested_reads": [r for r in data.nested_reads if r.source_file == path],
+    })) for path in data.inspected_files}
+
+
 def summary(data: AuditData) -> dict:
     kinds = Counter(i.evidence_kind for i in data.invocations if i.evidence_kind)
     kinds.update(r.evidence_kind for r in data.nested_reads if r.evidence_kind)
@@ -60,14 +68,18 @@ def summary(data: AuditData) -> dict:
             if row.evidence_kind == "skill-file-read":
                 combined.add(row.combined_use_id or ("nested", row.execution_owner))
     return {
+        "untimed_invocations": sum(observation_time(i) is None for i in data.invocations),
+        "untimed_nested_reads": sum(r.result_record_time is None for r in data.nested_reads),
         "instruction_deliveries": kinds["instruction-delivery"],
         "skill_file_reads": kinds["skill-file-read"],
         "supporting_reads": kinds["supporting-read"],
+        "unattributed_reads": sum(r.evidence_kind is None for r in data.nested_reads),
         "native_read_occurrences": sum(i.evidence_kind in ("skill-file-read", "supporting-read")
                                        for i in data.invocations),
         "native_distinct_read_executions": len({i.evidence_owner for i in data.invocations
                                                if i.evidence_kind in ("skill-file-read", "supporting-read")
                                                and i.evidence_owner is not None}),
+        "native_inherited_occurrences": sum(i.inheritance == "inherited" for i in data.invocations if i.evidence_kind),
         "native_unresolved_occurrences": sum(i.inheritance == "unresolved"
                                              for i in data.invocations if i.evidence_kind),
         "nested_read_occurrences": len(data.nested_reads),

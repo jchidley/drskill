@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import posixpath
 from pathlib import Path
 from typing import Literal
 
@@ -39,10 +40,13 @@ class NestedRead(BaseModel):
     qualifications: list[str] = Field(default_factory=list)
     inheritance: Literal["unresolved", "independent", "inherited"] = "unresolved"
     execution_owner: tuple[str, str, str] | None = None
+    window_membership: Literal["inside", "unknown"] = "unknown"
 
 
 class PiExtractResult(ExtractResult):
     session_header: dict = Field(default_factory=dict)
+    source_sha256: str | None = None
+    inspected_records: int = 0
     result_payload_hashes: dict[str, str] = Field(default_factory=dict)
     entry_parents: dict[str, str | None] = Field(default_factory=dict)
     nested_reads: list[NestedRead] = Field(default_factory=list)
@@ -57,6 +61,8 @@ def _extract_snapshot(path: Path, raw: bytes) -> PiExtractResult:
     result = PiExtractResult()
     records = []
     source_sha256 = hashlib.sha256(raw).hexdigest()
+    result.source_sha256 = source_sha256
+    result.inspected_records = len(raw.splitlines())
 
     def diagnostic(code, line, detail):
         result.nested_diagnostics.append(NestedDiagnostic(
@@ -206,7 +212,8 @@ def extract_corpus(paths: list[Path]) -> PiExtractResult:
 
 
 def reconcile_corpus(extracted: dict[str, PiExtractResult],
-                     diagnostics: list[NestedDiagnostic] | None = None) -> PiExtractResult:
+                     diagnostics: list[NestedDiagnostic] | None = None,
+                     source_locations: dict[str, str] | None = None) -> PiExtractResult:
     """Recompute ownership from supplied snapshots, including cached snapshots.
 
     Payload hashes cover the entire retained result message; no raw file bodies
@@ -220,6 +227,20 @@ def reconcile_corpus(extracted: dict[str, PiExtractResult],
     result.nested_diagnostics = (list(diagnostics) if diagnostics is not None else
                                 [d for s in snapshots.values() for d in s.nested_diagnostics])
     session_ids = [snapshot.session_header.get("id") for snapshot in snapshots.values()]
+    locations = {Path(p).resolve(): value for p, value in (source_locations or {}).items()}
+    source_index: dict[str, list[Path]] = {}
+    for path in snapshots:
+        # Physical provenance is always available; recorded locations are supplied
+        # declarations, never inferred from session IDs or resource paths.
+        for value in (str(path), locations.get(path)):
+            if value is None:
+                continue
+            normalized, _ = resolve_read_path(value, None)
+            if normalized is None:
+                raise ValueError("Source location must be an absolute lexical POSIX or Windows path")
+            candidates = source_index.setdefault(normalized, [])
+            if path not in candidates:
+                candidates.append(path)
 
     def ancestry(path):
         chain = []
@@ -234,14 +255,15 @@ def reconcile_corpus(extracted: dict[str, PiExtractResult],
                 return chain, None
             if not isinstance(parent, str) or not parent.strip():
                 return chain, "invalid-parent"
-            parent_path = Path(parent)
-            if not parent_path.is_absolute():
-                parent_path = path.parent / parent_path
-            parent_path = parent_path.resolve()
+            recorded = locations.get(path, str(path))
+            normalized_location, _ = resolve_read_path(recorded, None)
+            parent_location, _ = resolve_read_path(parent, posixpath.dirname(normalized_location))
+            candidates = source_index.get(parent_location, [])
+            if len(candidates) != 1:
+                return chain, "ambiguous-parent" if candidates else "missing-parent"
+            parent_path = candidates[0]
             if parent_path in seen:
                 return chain, "cycle"
-            if parent_path not in snapshots:
-                return chain, "missing-parent"
             seen.add(parent_path)
             chain.append(parent_path)
             path = parent_path
@@ -314,6 +336,7 @@ def reconcile_corpus(extracted: dict[str, PiExtractResult],
             inv.inheritance = "independent" if owner is inv else "inherited"
             if owner is not inv:
                 inv.resolved_path = owner.resolved_path
+                inv.declared_supporting_paths = list(owner.declared_supporting_paths)
                 inv.qualifications = list(owner.qualifications)
                 inv.qualifications.append("Inherited evidence uses verified owner's context")
                 inv.combined_use_id = owner.combined_use_id

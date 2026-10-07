@@ -33,6 +33,8 @@ def _covered_harnesses(invocations: list[Invocation], unused_days: int,
                        today: dt.date) -> set[str]:
     earliest: dict[str, dt.date] = {}
     for inv in invocations:
+        if inv.timestamp is None:
+            continue
         d = inv.timestamp.date()
         if inv.harness not in earliest or d < earliest[inv.harness]:
             earliest[inv.harness] = d

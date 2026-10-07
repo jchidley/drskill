@@ -97,15 +97,15 @@ def test_windows_wrapper_native_and_nested_reads_are_qualified_and_deduplicated(
     assert payload["evidence_summary"]["skill_file_reads"] == 2
     assert payload["evidence_summary"]["supporting_reads"] == 1
     assert payload["evidence_summary"]["combined_observed_uses"] == 1
-    assert payload["report_version"] == 3
-    assert payload["extraction_versions"]["pi"] == 12
+    assert payload["report_version"] == 4
+    assert payload["extraction_versions"]["pi"] == 13
     assert payload["nested_reads"][1]["evidence_kind"] == "supporting-read"
     assert payload["invocations"][1]["result_entry_id"] == "done"
     human = CliRunner().invoke(app, args)
     assert human.exit_code == 0, human.output
     assert "Windows lexical namespace" in human.output
-    assert "report 3" in human.output
-    assert "Pi extraction 12" in human.output
+    assert "report 4" in human.output
+    assert "Pi extraction 13" in human.output
 
 
 def test_case_mismatch_and_cross_os_paths_never_certify_same_resource(tmp_path):

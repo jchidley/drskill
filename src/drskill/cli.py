@@ -736,10 +736,16 @@ def audit(
     ),
     harness: str | None = typer.Option(None, "--harness", help="one harness only"),
     since: str | None = typer.Option(
-        None, "--since", help="window: 7d, 30d, or YYYY-MM-DD"
+        None, "--since", help="inclusive UTC boundary: 7d, 30d, YYYY-MM-DD, or ISO UTC timestamp"
     ),
-    file: Path | None = typer.Option(
-        None, "--file", help="audit one trace file (see also --harness)"
+    file: list[Path] | None = typer.Option(
+        None, "--file", help="explicit trace file; repeat for a bounded corpus"
+    ),
+    until: str | None = typer.Option(
+        None, "--until", help="exclusive UTC boundary: YYYY-MM-DD or ISO UTC timestamp"
+    ),
+    source_location: list[str] | None = typer.Option(
+        None, "--source-location", help="relocated log provenance: PHYSICAL_FILE=RECORDED_ABSOLUTE_PATH; repeat"
     ),
     last: bool = typer.Option(
         False, "--last", help="only the most recent session in scope"
@@ -759,7 +765,7 @@ def audit(
 
     from drskill.traces import pipeline as tpipeline
     from drskill.traces import report as treport
-    from drskill.traces.common import parse_since
+    from drskill.traces.common import parse_since, parse_boundary
 
     home = _home()
     if harness is not None and harness not in tpipeline.ADAPTERS:
@@ -774,8 +780,23 @@ def audit(
         try:
             cutoff = parse_since(since, dt.datetime.now(dt.timezone.utc))
         except ValueError:
-            console.print("[red]error:[/red] invalid --since (use 7d, 30d, or YYYY-MM-DD)")
+            console.print("[red]error:[/red] invalid --since (use 7d, 30d, YYYY-MM-DD, or an ISO UTC timestamp)")
             raise typer.Exit(1)
+    end = None
+    if until is not None:
+        try:
+            end = parse_boundary(until)
+            if cutoff is not None and cutoff >= end:
+                raise ValueError("since must precede until")
+        except ValueError:
+            console.print("[red]error:[/red] invalid window: --until must be UTC and after --since")
+            raise typer.Exit(1)
+    if branch is not None and file is not None and len(file) != 1:
+        console.print("[red]error:[/red] --branch requires exactly one --file")
+        raise typer.Exit(1)
+    if source_location and not file:
+        console.print("[red]error:[/red] --source-location requires --file")
+        raise typer.Exit(1)
     if branch is not None and file is None:
         console.print("[red]error:[/red] --branch requires --file")
         raise typer.Exit(1)
@@ -783,13 +804,22 @@ def audit(
         console.print("[red]error:[/red] --file and --last cannot be combined")
         raise typer.Exit(1)
     if file is not None:
-        if not file.is_file():
-            console.print(
-                f"[red]error:[/red] no such trace file: {escape(str(file))}"
-            )
-            raise typer.Exit(1)
+        for path in file:
+            if not path.is_file():
+                console.print(f"[red]error:[/red] no such trace file: {escape(str(path))}")
+                raise typer.Exit(1)
         try:
-            data = tpipeline.run_audit_file(home, file, harness, cutoff, branch=branch)
+            locations = {}
+            for declaration in source_location or []:
+                physical, separator, recorded = declaration.partition("=")
+                if not separator or not physical or not recorded:
+                    raise ValueError("--source-location requires PHYSICAL_FILE=RECORDED_ABSOLUTE_PATH")
+                physical = str(Path(physical).resolve())
+                if physical in locations:
+                    raise ValueError("Duplicate physical source location declaration")
+                locations[physical] = recorded
+            data = tpipeline.run_audit_files(home, file, harness, cutoff, end,
+                                             source_locations=locations, branch=branch)
         except tpipeline.UnknownTraceLocation:
             valid = ", ".join(sorted(tpipeline.ADAPTERS))
             console.print(
@@ -806,7 +836,7 @@ def audit(
             raise typer.Exit(1)
     else:
         data = tpipeline.run_audit(
-            home, root, global_mode, harness, cutoff, last=last
+            home, root, global_mode, harness, cutoff, last=last, until=end
         )
 
     from drskill.traces import evidence as tevidence
@@ -847,6 +877,10 @@ def audit(
         records = data.invocations
         if name is not None:
             records = [i for i in records if treport.matches(i, name)]
+        selected_data = data if name is None else data.model_copy(update={
+            "invocations": records,
+            "nested_reads": [r for r in data.nested_reads if r.skill_name == name],
+        })
         payload = {
             "invocations": [i.model_dump(mode="json") for i in records],
             "coverage": {
@@ -858,15 +892,15 @@ def audit(
             "report_version": tevidence.REPORT_VERSION,
             "evidence_scope": data.evidence_scope,
             "inspected_files": data.inspected_files,
+            "window": data.window,
+            "sources": data.sources,
+            "source_summaries": tevidence.source_summaries(selected_data),
             "extraction_versions": data.extraction_versions,
             "coverage_limits": data.coverage_limits,
             "nested_reads": [r.model_dump(mode="json") for r in data.nested_reads
                              if name is None or r.skill_name == name],
             "nested_diagnostics": [d.model_dump(mode="json") for d in data.nested_diagnostics],
-            "evidence_summary": tevidence.summary(data if name is None else data.model_copy(update={
-                "invocations": records,
-                "nested_reads": [r for r in data.nested_reads if r.skill_name == name],
-            })),
+            "evidence_summary": tevidence.summary(selected_data),
         }
         if include_crossref:
             # "unused" stays null both when there's no coverage to judge by

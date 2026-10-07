@@ -25,7 +25,7 @@ from drskill.traces.model import Invocation
 from drskill.traces.pi_nested import PiExtractResult, NestedDiagnostic, extract_nested
 
 HARNESS = "pi"
-VERSION = 12
+VERSION = 13
 
 _SKILL_OPEN = re.compile(r'^\s*<skill\b([^>]*)>')
 _ATTR = re.compile(
@@ -280,7 +280,7 @@ def extract(path: Path) -> PiExtractResult:
         role = message.get("role")
         content = message.get("content")
         ts = parse_ts(event.get("timestamp"))
-        if role not in ("user", "assistant") or ts is None:
+        if role not in ("user", "assistant"):
             continue
         base = dict(
             harness=HARNESS,
@@ -359,7 +359,7 @@ def extract(path: Path) -> PiExtractResult:
             name = block.get("name", "")
             args = block.get("arguments") or {}
             tool_call_id = block.get("id")
-            if name.startswith("mcp__"):
+            if name.startswith("mcp__") and ts is not None:
                 parts = name.split("__")
                 if len(parts) >= 3:
                     pending.append((lineno, dict(
@@ -415,8 +415,11 @@ def extract(path: Path) -> PiExtractResult:
                         turn_id=turn_id,
                         requested_path=evidence,
                         resolved_path=resolved,
+                        tool_call_id=tool_call_id,
                         result_entry_id=result_entry_id,
                         result_source_line=result_line,
+                        result_record_time=(by_id[result_entry_id][0].get("timestamp")
+                                            if parse_ts(by_id[result_entry_id][0].get("timestamp")) else None),
                         qualifications=quals,
                     )))
 
