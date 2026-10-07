@@ -57,8 +57,10 @@ def aggregate(invocations: list[Invocation]) -> dict[str, list[NameStats]]:
         for (kind, name, server), invs in names.items():
             stats.append(NameStats(
                 kind=kind, name=name, server=server,
-                count=len({i.combined_use_id or ("row", n) for n, i in enumerate(invs)
-                           if not i.sidechain and i.evidence_kind != "supporting-read"}),
+                count=len({i.combined_use_id or i.evidence_owner or ("row", n)
+                           for n, i in enumerate(invs)
+                           if not i.sidechain and i.evidence_kind != "supporting-read"
+                           and i.inheritance != "unresolved"}),
                 sidechain=sum(1 for i in invs if i.sidechain),
                 sessions=len({i.session_id for i in invs}),
                 last_used=max(i.timestamp for i in invs),
@@ -145,7 +147,8 @@ def render_audit(console: Console, data: AuditData) -> None:
             f"\n[bold]{_clean(harness)}[/bold]  coverage: "
             f"{c.first.date().isoformat()} to {c.last.date().isoformat()} · "
             f"{c.sessions} session{'s' if c.sessions != 1 else ''} · "
-            f"{c.invocations} invocation{'s' if c.invocations != 1 else ''}"
+            f"{c.invocations} " + ("evidence rows" if harness == "pi" else
+                                  f"invocation{'s' if c.invocations != 1 else ''}")
         )
         table = Table(show_edge=False, pad_edge=False)
         for col in ("name", "kind", "server", "uses", "share", "sessions", "last used"):
@@ -243,6 +246,9 @@ def render_drilldown(console: Console, name: str, data: AuditData) -> None:
             console.print(f"    [dim]via: {_get_via_text(inv)}[/dim]")
             if inv.requested_path:
                 console.print(f"    requested: {_clean(inv.requested_path)}")
+            if inv.evidence_kind:
+                console.print(f"    ownership: {_clean(inv.inheritance or 'unknown')} · "
+                              f"owner: {_clean(str(inv.evidence_owner))}")
             if inv.result_entry_id:
                 console.print(f"    result: {_clean(inv.result_entry_id)} line {inv.result_source_line}")
             for qualification in inv.qualifications:
@@ -274,6 +280,11 @@ def render_evidence(console: Console, data: AuditData, name: str | None = None) 
         f"declared supporting reads: {counts['supporting_reads']}"
     )
     console.print(
+        f"Native reads: {counts['native_read_occurrences']} physical occurrences · "
+        f"{counts['native_distinct_read_executions']} distinct executions · "
+        f"{counts['native_unresolved_occurrences']} unresolved native/delivery observations"
+    )
+    console.print(
         f"Nested reads: {counts['nested_read_occurrences']} physical occurrences · "
         f"{counts['nested_distinct_executions']} distinct executions · "
         f"{counts['nested_inherited_occurrences']} inherited · "
@@ -293,6 +304,8 @@ def render_evidence(console: Console, data: AuditData, name: str | None = None) 
             console.print(f"    fixture provenance: {_clean(str(row.provenance))}")
         for qualification in row.qualifications:
             console.print(f"    [dim]{_clean(qualification)}[/dim]")
+    if name is not None and data.nested_diagnostics:
+        console.print("[dim]Report-wide coverage diagnostics (not attributed to this name):[/dim]")
     for diagnostic in data.nested_diagnostics:
         console.print(f"  [dim]{_clean(diagnostic.code)}: {_clean(diagnostic.detail)} "
                       f"({_clean(diagnostic.source_file)}:{diagnostic.source_line})[/dim]")

@@ -3,16 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import posixpath
-import re
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from drskill.traces.model import ExtractResult
-from drskill.traces.common import parse_ts
+from drskill.traces.common import parse_ts, resolve_read_path
 
 RECORDER_BOUNDS = "recorder bounds: 256 calls, 8 KiB arguments/call, 32 KiB arguments/result"
 
@@ -52,18 +49,11 @@ class PiExtractResult(ExtractResult):
     nested_diagnostics: list[NestedDiagnostic] = Field(default_factory=list)
 
 
-@dataclass
-class _SessionSnapshot:
-    header: dict
-    entries: dict[str, dict]
-    extracted: PiExtractResult
-
-
 def extract_nested(path: Path, raw: bytes) -> PiExtractResult:
-    return _extract_snapshot(path, raw).extracted
+    return _extract_snapshot(path, raw)
 
 
-def _extract_snapshot(path: Path, raw: bytes) -> _SessionSnapshot:
+def _extract_snapshot(path: Path, raw: bytes) -> PiExtractResult:
     result = PiExtractResult()
     records = []
     source_sha256 = hashlib.sha256(raw).hexdigest()
@@ -95,6 +85,8 @@ def _extract_snapshot(path: Path, raw: bytes) -> _SessionSnapshot:
             if entry_id in seen_entries:
                 duplicate_entries.add(entry_id)
             seen_entries.add(entry_id)
+    parents = {e.get("id"): e for _, e in records if isinstance(e.get("id"), str)
+               and e.get("id") not in duplicate_entries}
     for line, event in records:
         message = event.get("message")
         if event.get("type") != "message" or not isinstance(message, dict):
@@ -142,24 +134,14 @@ def _extract_snapshot(path: Path, raw: bytes) -> _SessionSnapshot:
                 "Result-record time is not nested-call start time",
                 "Full-file coverage unproven",
             ]
-            resolved = None
-            if (requested.startswith(("~", "@")) or re.match(r"^[A-Za-z]:", requested)
-                or "\\" in requested or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", requested)):
-                qualifications.append("Unresolved path alias or non-POSIX namespace")
-            elif requested.startswith("/"):
-                resolved = posixpath.normpath(requested)
-            elif isinstance(cwd, str) and cwd.startswith("/"):
-                resolved = posixpath.normpath(posixpath.join(cwd, requested))
-            else:
-                qualifications.append("Relative path unresolved: missing absolute session cwd")
+            resolved, path_qualifications = resolve_read_path(requested, cwd)
+            qualifications.extend(path_qualifications)
             if "offset" in args or "limit" in args:
                 qualifications.append("Partial read requested via offset/limit")
             time = event.get("timestamp")
             if parse_ts(time) is None:
                 time = None
                 diagnostic("missing-result-time", line, "No retained result-record timestamp")
-            parents = {e.get("id"): e for _, e in records if isinstance(e.get("id"), str)
-                       and e.get("id") not in duplicate_entries}
             ancestor_id = event.get("parentId")
             visited = set()
             turn_id = None
@@ -189,13 +171,15 @@ def _extract_snapshot(path: Path, raw: bytes) -> _SessionSnapshot:
     result.entry_parents = {
         key: event.get("parentId") if isinstance(event.get("parentId"), str) else None
         for key, event in entries.items() if key not in duplicate_entries
+        and "parentId" in event
+        and (event["parentId"] is None or isinstance(event["parentId"], str))
     }
     result.result_payload_hashes = {
         key: hashlib.sha256(json.dumps(event.get("message"), sort_keys=True,
                                       ensure_ascii=True).encode()).hexdigest()
         for key, event in entries.items()
     }
-    return _SessionSnapshot(header=header, entries=entries, extracted=result)
+    return result
 
 
 def extract_corpus(paths: list[Path]) -> PiExtractResult:
@@ -205,7 +189,7 @@ def extract_corpus(paths: list[Path]) -> PiExtractResult:
     not permission to traverse the filesystem or infer missing child executions.
     """
     result = PiExtractResult()
-    snapshots: dict[Path, _SessionSnapshot] = {}
+    snapshots: dict[Path, PiExtractResult] = {}
     for path in sorted(set(p.resolve() for p in paths)):
         try:
             raw = path.read_bytes()
@@ -215,10 +199,9 @@ def extract_corpus(paths: list[Path]) -> PiExtractResult:
                 code="missing-session", source_file=str(path), detail=type(error).__name__))
             continue
         snapshots[path] = snapshot
-        result.nested_reads.extend(snapshot.extracted.nested_reads)
-        result.nested_diagnostics.extend(snapshot.extracted.nested_diagnostics)
+        result.nested_diagnostics.extend(snapshot.nested_diagnostics)
 
-    return reconcile_corpus({str(path): snapshot.extracted for path, snapshot in snapshots.items()},
+    return reconcile_corpus({str(path): snapshot for path, snapshot in snapshots.items()},
                             result.nested_diagnostics)
 
 
@@ -263,37 +246,75 @@ def reconcile_corpus(extracted: dict[str, PiExtractResult],
             chain.append(parent_path)
             path = parent_path
 
+    def verified_owner(path, entry_ids, matches):
+        chain, problem = ancestry(path)
+        owner = None
+        if problem is None:
+            for ancestor in chain:
+                candidate = snapshots[ancestor].result_payload_hashes
+                if not any(entry_id in candidate for entry_id in entry_ids):
+                    continue
+                if any(candidate.get(entry_id) != snapshots[path].result_payload_hashes.get(entry_id)
+                       for entry_id in entry_ids):
+                    return None, "conflicting-payload"
+                found = matches(snapshots[ancestor])
+                if len(found) != 1:
+                    return None, "invalid-ancestor-evidence"
+                owner = found[0]
+        return owner, problem
+
     for row in result.nested_reads:
         row.inheritance = "unresolved"
         row.execution_owner = None
         path = Path(row.source_file).resolve()
-        chain, problem = ancestry(path)
-        owner = row
-        entry = snapshots[path].result_payload_hashes.get(row.occurrence[1])
-        if problem is None:
-            for ancestor in chain:
-                candidate = snapshots[ancestor].result_payload_hashes.get(row.occurrence[1])
-                if candidate is None:
-                    continue
-                if candidate != entry:
-                    problem = "conflicting-payload"
-                    break
-                matches = [r for r in snapshots[ancestor].nested_reads
-                           if r.occurrence[1:] == row.occurrence[1:]]
-                if len(matches) != 1:
-                    problem = "invalid-ancestor-evidence"
-                    break
-                owner = matches[0]
+        owner, problem = verified_owner(
+            path, [row.occurrence[1]],
+            lambda snapshot: [r for r in snapshot.nested_reads
+                              if r.occurrence[1:] == row.occurrence[1:]])
         if problem:
             result.nested_diagnostics.append(NestedDiagnostic(
                 code="ancestry-" + problem, source_file=row.source_file,
                 source_line=row.source_line,
                 detail="Execution ownership unresolved; do not infer a distinct execution"))
             continue
+        owner = owner or row
         row.execution_owner = owner.occurrence
         row.inheritance = "independent" if owner is row else "inherited"
         if owner is not row:
             row.resolved_path = owner.resolved_path
             row.qualifications = list(owner.qualifications)
             row.qualifications.append("Inherited request path uses verified execution owner's context")
+
+    for path, snapshot in snapshots.items():
+        for inv in snapshot.invocations:
+            result.invocations.append(inv)
+            if inv.evidence_kind is None:
+                continue
+            inv.inheritance = "unresolved"
+            inv.evidence_owner = None
+            entry_ids = [inv.entry_id]
+            if inv.result_entry_id:
+                entry_ids.append(inv.result_entry_id)
+            owner, problem = verified_owner(
+                path, entry_ids,
+                lambda ancestor: [i for i in ancestor.invocations
+                                  if i.entry_id == inv.entry_id
+                                  and i.result_entry_id == inv.result_entry_id
+                                  and i.evidence_kind == inv.evidence_kind])
+            if problem:
+                result.nested_diagnostics.append(NestedDiagnostic(
+                    code="ancestry-" + problem, source_file=inv.source_file,
+                    source_line=inv.source_line,
+                    detail="Native/delivery observation ownership unresolved"))
+                inv.combined_use_id = None
+                continue
+            owner = owner or inv
+            inv.evidence_owner = (owner.session_id, owner.entry_id,
+                                  owner.result_entry_id or "delivery")
+            inv.inheritance = "independent" if owner is inv else "inherited"
+            if owner is not inv:
+                inv.resolved_path = owner.resolved_path
+                inv.qualifications = list(owner.qualifications)
+                inv.qualifications.append("Inherited evidence uses verified owner's context")
+                inv.combined_use_id = owner.combined_use_id
     return result

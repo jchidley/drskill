@@ -37,6 +37,8 @@ class Invocation(BaseModel):
     result_source_line: int | None = None  # 1-based line of that result entry
     combined_use_id: str | None = None  # ties a wrapper and its same-turn read
     qualifications: list[str] = Field(default_factory=list)
+    evidence_owner: tuple[str, str, str] | None = None
+    inheritance: Literal["unresolved", "independent", "inherited"] | None = None
     declared_supporting_paths: list[str] = Field(default_factory=list)
 
 

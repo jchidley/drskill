@@ -810,7 +810,6 @@ def audit(
         )
 
     from drskill.traces import evidence as tevidence
-    tevidence.classify_reads(data)
 
     # The scan join (installed-but-never-invoked) only makes sense against the
     # plain, unfiltered report: a single-entity drilldown or a --file view has

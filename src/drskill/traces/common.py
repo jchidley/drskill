@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import posixpath
 import re
 
 from drskill.text import one_line
@@ -53,3 +55,26 @@ def parse_ts(value: object) -> dt.datetime | None:
 def munge_path(p: str) -> str:
     """A cwd the way Claude Code names its per-project trace directory."""
     return re.sub(r"[/.]", "-", p)
+
+
+def resolve_read_path(requested: str, cwd: str | None) -> tuple[str | None, list[str]]:
+    """Lexical POSIX normalization of a requested path against the session cwd."""
+    qualifications: list[str] = []
+    if (requested.startswith(("~", "@"))
+            or re.match(r"^[A-Za-z]:", requested)
+            or "\\" in requested
+            or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", requested)):
+        qualifications.append("Unresolved path alias or non-POSIX namespace")
+        return None, qualifications
+    if requested.startswith("/"):
+        return posixpath.normpath(requested), qualifications
+    if isinstance(cwd, str) and cwd.startswith("/"):
+        return posixpath.normpath(posixpath.join(cwd, requested)), qualifications
+    qualifications.append("Relative path unresolved: missing absolute session cwd")
+    return None, qualifications
+
+
+def combined_use_id(session_id: str, turn_id: str, resolved_path: str) -> str:
+    return hashlib.sha256(
+        f"{session_id}\n{turn_id}\n{resolved_path}".encode("utf-8")
+    ).hexdigest()

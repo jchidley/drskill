@@ -27,7 +27,7 @@ Without `--branch`, both corpus and explicit-file reports inspect **all retained
 raw branches**. Branch selection requires an explicit Pi file and rejects
 missing, duplicate or cyclic ancestry. It does not infer a selected leaf,
 interpret compacted model context, or discover children from acknowledgements.
-Branch diagnostics remain conservative: malformed/unavailable records are not
+Branch diagnostics remain conservative and are labelled report-wide in named drilldowns: malformed/unavailable records are not
 discarded to certify complete branch coverage.
 
 Project scoping uses recorded cwd. Nested rows lacking a result timestamp remain
@@ -60,7 +60,7 @@ a unique same-turn wrapper and an exact normalized location/path match. Both
 rows, detector provenance and source locators survive. Missing locations,
 unresolved namespaces and basename-only matches remain unmerged.
 Supporting reads are reported separately, never treated as independent starts.
-Combined uses are observations, not intent, following instructions or completion.
+Combined uses count Pi skill delivery/read observations only (not other harnesses or MCP calls), not intent, following instructions or completion.
 
 Nested physical occurrences, verified distinct execution owners, inherited
 occurrences and unresolved occurrences are separate counts. Owner reconciliation
@@ -69,6 +69,10 @@ entire retained result message. Equal IDs/paths in unrelated sessions do not
 merge. Missing/conflicting ancestry remains unresolved, excluded from distinct
 execution and combined-use counts rather than counted as definitely new.
 Native details retain the successful result locator as well as the call locator.
+Native read executions and expanded delivery observations also retain verified
+owners. Fork copies require matching source-call/delivery and result payloads;
+they retain physical rows without inflating combined uses. New child read results
+remain distinct, and missing/conflicting ancestry is unresolved.
 
 Only structured arguments/outcomes are consumed. No JavaScript, preview, printed
 output, shell mention, raw instruction/file-body fallback or recorder is added.
@@ -78,7 +82,7 @@ immutable historical resource identity, full-file coverage or exact call time.
 
 ## Cache and coverage
 
-Pi adapter version **10**, audit cache schema **2**, evidence report version **2**.
+Pi adapter version **11**, audit cache schema **2**, evidence report version **2**.
 Incompatible cache entries are re-extracted. Cache retains qualified rows,
 diagnostics, session ancestry, entry parents and result payload hashes, not raw
 result bodies. Ownership is recomputed over the current supplied corpus on cache

@@ -162,3 +162,127 @@ def test_duplicate_parent_result_never_certifies_new_child_execution(tmp_path):
     assert len(data.nested_reads) == 1
     assert data.nested_reads[0].execution_owner is None
     assert any(d.code == "ancestry-invalid-ancestor-evidence" for d in data.nested_diagnostics)
+
+
+def test_cached_pi_corpus_uses_no_session_rereads(tmp_path, monkeypatch):
+    path = session(tmp_path, "main.jsonl", [result(complete=False)])
+    run_audit(tmp_path, Path("/workspace"), False, "pi", None)
+    read_bytes = Path.read_bytes
+
+    def forbid_session_read(file):
+        if file == path:
+            raise AssertionError("cache hit must not reopen session bytes")
+        return read_bytes(file)
+
+    monkeypatch.setattr(Path, "read_bytes", forbid_session_read)
+    data = run_audit(tmp_path, Path("/workspace"), False, "pi", None)
+    assert not data.unreadable
+    assert len(data.nested_reads) == 1
+    assert any(d.code == "incomplete-coverage" for d in data.nested_diagnostics)
+
+
+def test_relative_explicit_file_and_untimed_since_are_qualified(tmp_path, monkeypatch):
+    import datetime as dt
+    from drskill.traces.pipeline import run_audit_file
+    record = result()
+    record.pop("timestamp")
+    path = session(tmp_path, "main.jsonl", [record])
+    monkeypatch.chdir(path.parent)
+    data = run_audit_file(tmp_path, Path("main.jsonl"), "pi",
+                          dt.datetime(2026, 10, 8, tzinfo=dt.timezone.utc))
+    assert len(data.nested_reads) == 1
+    assert data.nested_reads[0].result_record_time is None
+    assert any("Untimed" in limit for limit in data.coverage_limits)
+
+
+def test_combined_summary_does_not_include_other_harnesses(tmp_path):
+    import datetime as dt
+    from drskill.traces.evidence import summary
+    from drskill.traces.model import Invocation
+    from drskill.traces.pipeline import AuditData
+    data = AuditData(invocations=[Invocation(
+        harness="claude-code", session_id="s", timestamp=dt.datetime.now(dt.timezone.utc),
+        kind="skill", name="example", detection="explicit", source_file="claude.jsonl")])
+    assert summary(data)["combined_observed_uses"] == 0
+
+
+def test_non_pi_drift_preserves_existing_unused_report(tmp_path, monkeypatch):
+    import datetime as dt
+    from typer.testing import CliRunner
+    from drskill.cli import app
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path))
+    root = tmp_path / "repo"
+    skill = root / ".claude/skills/unused-example"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: unused-example\ndescription: demo\n---\nbody\n")
+    traces = tmp_path / ".claude/projects/project"
+    traces.mkdir(parents=True)
+    timestamp = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=100)).isoformat()
+    (traces / "valid.jsonl").write_text(json.dumps({
+        "type": "assistant", "sessionId": "claude", "timestamp": timestamp,
+        "cwd": str(root), "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "c", "name": "Skill", "input": {"skill": "used"}}
+        ]}}) + "\n")
+    (traces / "drift.jsonl").write_text('{"type":"unknown"}\n')
+    response = CliRunner().invoke(app, ["audit", "--root", str(root), "--json"])
+    assert response.exit_code == 0, response.output
+    payload = json.loads(response.output)
+    assert payload["drifted"] == {"claude-code": 1}
+    assert payload["coverage_limits"] == []
+    assert any(row["name"] == "unused-example" for row in payload["unused"])
+
+
+def test_native_duplicate_id_across_tool_names_cannot_certify_read(tmp_path):
+    from drskill.traces import pi
+    path = session(tmp_path, "native.jsonl", [
+        {"type": "message", "id": "a", "parentId": None,
+         "timestamp": "2026-10-07T00:00:01Z",
+         "message": {"role": "assistant", "content": [
+             {"type": "toolCall", "id": "same", "name": "read",
+              "arguments": {"path": "skills/example/SKILL.md"}},
+             {"type": "toolCall", "id": "same", "name": "bash",
+              "arguments": {"command": "true"}}]}},
+        {"type": "message", "id": "done", "parentId": "a",
+         "message": {"role": "toolResult", "toolCallId": "same",
+                     "toolName": "read", "isError": False}},
+    ])
+    extracted = pi.extract(path)
+    assert not extracted.invocations
+    assert any(d.code == "native-read-unresolved" for d in extracted.nested_diagnostics)
+
+
+def test_forked_delivery_and_nested_read_count_one_combined_use(tmp_path):
+    from drskill.traces.evidence import summary
+    parent = session(tmp_path, "parent.jsonl", [wrapper(), result(parent="u")])
+    session(tmp_path, "child.jsonl", [wrapper(), result(parent="u")], parentSession=str(parent))
+    data = run_audit(tmp_path, Path("/workspace"), False, "pi", None)
+    counts = summary(data)
+    assert counts["instruction_deliveries"] == 2
+    assert counts["nested_read_occurrences"] == 2
+    assert counts["nested_distinct_executions"] == 1
+    assert counts["combined_observed_uses"] == 1
+
+
+def test_native_fork_preserves_occurrences_and_distinct_executions(tmp_path):
+    from drskill.traces.evidence import summary
+    from drskill.traces.report import aggregate
+    call = {"type": "message", "id": "a", "parentId": "u",
+            "timestamp": "2026-10-07T00:00:01Z",
+            "message": {"role": "assistant", "content": [
+                {"type": "toolCall", "id": "read-1", "name": "read",
+                 "arguments": {"path": "skills/example/SKILL.md"}}]}}
+    done = {"type": "message", "id": "done", "parentId": "a",
+            "message": {"role": "toolResult", "toolCallId": "read-1",
+                        "toolName": "read", "isError": False}}
+    parent = session(tmp_path, "parent.jsonl", [wrapper(), call, done])
+    session(tmp_path, "child.jsonl", [wrapper(), call, done], parentSession=str(parent))
+    data = run_audit(tmp_path, Path("/workspace"), False, "pi", None)
+    counts = summary(data)
+    assert counts["native_read_occurrences"] == 2
+    assert counts["native_distinct_read_executions"] == 1
+    assert counts["combined_observed_uses"] == 1
+    assert aggregate(data.invocations)["pi"][0].count == 1
+    parent.unlink()
+    unresolved = run_audit(tmp_path, Path("/workspace"), False, "pi", None)
+    assert summary(unresolved)["native_distinct_read_executions"] == 0
+    assert summary(unresolved)["combined_observed_uses"] == 0

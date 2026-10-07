@@ -13,19 +13,20 @@ entry/call ids and contradictory or unrelated-branch results never certify.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import posixpath
 import re
 from pathlib import Path
 
-from drskill.traces.common import excerpt, parse_ts, skill_md_names
+from drskill.traces.common import (
+    excerpt, parse_ts, skill_md_names, resolve_read_path, combined_use_id,
+)
 from drskill.traces.model import Invocation
 from drskill.traces.pi_nested import PiExtractResult, NestedDiagnostic, extract_nested
 
 HARNESS = "pi"
-VERSION = 10
+VERSION = 11
 
 _SKILL_OPEN = re.compile(r'^\s*<skill\b([^>]*)>')
 _ATTR = re.compile(
@@ -113,23 +114,6 @@ def _thinking(content: object) -> str | None:
     return latest
 
 
-def _resolve_path(requested: str, cwd: str | None) -> tuple[str | None, list[str]]:
-    """Lexical POSIX normalization of a requested path against the session cwd."""
-    qualifications: list[str] = []
-    if (requested.startswith(("~", "@"))
-            or re.match(r"^[A-Za-z]:", requested)
-            or "\\" in requested
-            or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", requested)):
-        qualifications.append("Unresolved path alias or non-POSIX namespace")
-        return None, qualifications
-    if requested.startswith("/"):
-        return posixpath.normpath(requested), qualifications
-    if isinstance(cwd, str) and cwd.startswith("/"):
-        return posixpath.normpath(posixpath.join(cwd, requested)), qualifications
-    qualifications.append("Relative path unresolved: missing absolute session cwd")
-    return None, qualifications
-
-
 def _declared_supporting_paths(body: str) -> list[str]:
     """Declared supporting references only: explicit markdown links.
 
@@ -159,12 +143,6 @@ def _declared_supporting_paths(body: str) -> list[str]:
             seen.add(p)
             out.append(p)
     return out
-
-
-def _combined_use_id(session_id: str, turn_id: str, resolved_path: str) -> str:
-    return hashlib.sha256(
-        f"{session_id}\n{turn_id}\n{resolved_path}".encode("utf-8")
-    ).hexdigest()
 
 
 def extract(path: Path) -> PiExtractResult:
@@ -230,21 +208,8 @@ def extract(path: Path) -> PiExtractResult:
             parent_id = record[3]
 
     def in_branch(record: tuple[dict, int, str, str | None], ancestor_id: str) -> bool:
-        if ancestor_id in duplicate_entry_ids:
-            return False
-        seen: set[str] = set()
-        parent_id = record[3]
-        while parent_id is not None and parent_id not in seen:
-            if parent_id in duplicate_entry_ids:
-                return False
-            if parent_id == ancestor_id:
-                return True
-            seen.add(parent_id)
-            parent = by_id.get(parent_id)
-            if parent is None:
-                break
-            parent_id = parent[3]
-        return False
+        return (ancestor_id not in duplicate_entry_ids
+                and any(parent[2] == ancestor_id for parent in ancestor_records(record[3])))
 
     results_by_call: dict[str, list[tuple[dict, int, str, str | None]]] = {}
     for record in records:
@@ -258,8 +223,8 @@ def extract(path: Path) -> PiExtractResult:
         if isinstance(call_id, str):
             results_by_call.setdefault(call_id, []).append(record)
 
-    read_call_ids: set[str] = set()
-    duplicate_read_call_ids: set[str] = set()
+    tool_call_ids: set[str] = set()
+    duplicate_tool_call_ids: set[str] = set()
     for record in records:
         event = record[0]
         if event.get("type") != "message":
@@ -271,20 +236,19 @@ def extract(path: Path) -> PiExtractResult:
         if not isinstance(content, list):
             continue
         for block in content:
-            if not (isinstance(block, dict) and block.get("type") == "toolCall"
-                    and block.get("name") == "read"):
+            if not (isinstance(block, dict) and block.get("type") == "toolCall"):
                 continue
             call_id = block.get("id")
             if not isinstance(call_id, str):
                 continue
-            if call_id in read_call_ids:
-                duplicate_read_call_ids.add(call_id)
+            if call_id in tool_call_ids:
+                duplicate_tool_call_ids.add(call_id)
             else:
-                read_call_ids.add(call_id)
+                tool_call_ids.add(call_id)
 
     def certify(tool_call_id: object, assistant_id: str):
         if (not isinstance(tool_call_id, str) or not tool_call_id
-                or tool_call_id in duplicate_read_call_ids
+                or tool_call_id in duplicate_tool_call_ids
                 or assistant_id in duplicate_entry_ids):
             return None
         results = [
@@ -338,7 +302,7 @@ def extract(path: Path) -> PiExtractResult:
                 continue
             requested = block["location"]
             if requested:
-                resolved, path_quals = _resolve_path(requested, project)
+                resolved, path_quals = resolve_read_path(requested, project)
             else:
                 resolved, path_quals = None, []
             quals = [
@@ -418,7 +382,7 @@ def extract(path: Path) -> PiExtractResult:
             if name == "read" and isinstance(args, dict):
                 evidence = str(args.get("path", ""))
                 skill_names = skill_md_names(evidence)
-                resolved, path_quals = _resolve_path(evidence, project)
+                resolved, path_quals = resolve_read_path(evidence, project)
                 declared = declared_by_turn.get(turn_id)
                 supporting = (declared is not None and resolved is not None and
                               resolved in _declared_supporting_paths(declared["body"]))
@@ -469,7 +433,7 @@ def extract(path: Path) -> PiExtractResult:
         if wrapper_path is None or wrapper["turn_id"] is None:
             continue
         matched = False
-        combined = _combined_use_id(session_id, wrapper["turn_id"], wrapper_path)
+        combined = combined_use_id(session_id, wrapper["turn_id"], wrapper_path)
         for read in read_rows:
             if (read["resolved_path"] == wrapper_path
                     and read["turn_id"] == wrapper["turn_id"]):

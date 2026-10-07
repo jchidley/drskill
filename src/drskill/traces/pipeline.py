@@ -66,6 +66,7 @@ def run_audit(
             live_keys.add(cache.entry_key(trace))
     for adapter in selected:
         for trace in adapter.discover(home):
+            data.extraction_versions[adapter.HARNESS] = adapter.VERSION
             entry = cache.load_entry(cdir, trace)
             if entry is None or entry.adapter_version != adapter.VERSION:
                 try:
@@ -91,6 +92,7 @@ def run_audit(
             if entry.pi_evidence is not None:
                 pi_snapshots[str(trace)] = entry.pi_evidence
     nested = reconcile_corpus(pi_snapshots)
+    data.invocations = [i for i in data.invocations if i.harness != pi.HARNESS] + nested.invocations
     data.nested_reads = nested.nested_reads
     data.nested_diagnostics = nested.nested_diagnostics
     projects = {p: s.session_header.get("cwd") for p, s in pi_snapshots.items()}
@@ -113,7 +115,7 @@ def run_audit(
         ]
         data.nested_reads = [r for r in data.nested_reads if r.source_file == newest]
         data.nested_diagnostics = [d for d in data.nested_diagnostics if d.source_file == newest]
-    _qualify_coverage(data, bool(pi_snapshots), since)
+    _qualify_coverage(data, pi.HARNESS in data.extraction_versions, since)
     return data
 
 
@@ -136,7 +138,7 @@ def run_audit_file(
                              or parse_ts(r.result_record_time) >= since]
         data.nested_diagnostics = nested.nested_diagnostics
     data.invocations = [
-        i for i in result.invocations
+        i for i in (nested.invocations if isinstance(result, PiExtractResult) else result.invocations)
         if since is None or i.timestamp >= since
     ]
     if result.recognized == 0 and path.stat().st_size > 0:
@@ -196,5 +198,8 @@ def _qualify_coverage(data: AuditData, has_pi: bool, since: dt.datetime | None) 
         data.coverage_limits.append("Nested diagnostics qualify retained coverage; positive complete rows remain usable")
     if since is not None and any(r.result_record_time is None for r in data.nested_reads):
         data.coverage_limits.append("Untimed read occurrences retained; membership in requested time window is unknown")
-    if data.unreadable or data.drifted:
+    if has_pi and (data.unreadable or data.drifted.get(pi.HARNESS)):
         data.coverage_limits.append("Unreadable or unrecognized traces prevent confident unused classification")
+
+    from drskill.traces.evidence import classify_reads
+    classify_reads(data)
