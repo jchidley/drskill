@@ -1,5 +1,7 @@
 """Observed projections and explicitly synthetic regressions at Pi extract(Path)."""
+import io
 import json
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -30,6 +32,30 @@ def test_observed_reads_preserve_request_identity_and_outer_failure(tmp_path):
     assert len(result.nested_reads[-1].requested_path) > 200
     assert result.invocations == []
     assert sum(d.code == "read-error" for d in result.nested_diagnostics) == 2
+
+
+def test_synthetic_live_file_uses_one_snapshot_for_all_evidence(tmp_path, monkeypatch):
+    path = write_session(tmp_path, {"type": "session", "id": "s", "cwd": "/workspace"},
+                         [synthetic_result([read_row()])])
+    original = path.read_bytes()
+    extra = synthetic_result([read_row("call/2")])
+    extra["id"] = "later"
+    changed = original + (json.dumps(extra) + "\n").encode()
+    open_file = Path.open
+    advanced = False
+
+    def changing_open(file, mode="r", *args, **kwargs):
+        nonlocal advanced
+        if file != path or mode not in ("r", "rb"):
+            return open_file(file, mode, *args, **kwargs)
+        snapshot = changed if advanced else original
+        advanced = True
+        return io.BytesIO(snapshot) if "b" in mode else io.StringIO(snapshot.decode())
+
+    monkeypatch.setattr(Path, "open", changing_open)
+    result = pi.extract(path)
+    assert len(result.nested_reads) == 1
+    assert result.nested_reads[0].source_sha256 == hashlib.sha256(original).hexdigest()
 
 
 def synthetic_result(calls, complete=True, **extra):

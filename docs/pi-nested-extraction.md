@@ -24,7 +24,8 @@ tool calls or silently lose it through the current invocation-only cache.
 
 Scope is **all raw branches in explicitly supplied physical logs**. Result entry
 ID, its retained `parentId`, session ID, source file and line preserve branch
-provenance. This API does not select a branch leaf or infer missing ancestry from
+provenance. Native and nested single-file evidence share one byte snapshot, even if a live
+file grows during extraction. This API does not select a branch leaf or infer missing ancestry from
 linear order. It does not discover children from launch acknowledgements or open
 unrequested parent files. Include the expected child path explicitly; an absent
 file yields `missing-session`. Unknown/unprovided child logs are missing coverage,
@@ -146,10 +147,13 @@ Task-start review baseline: `8ba75d732357800554b4ddc35a0871b0a516b99a`,
 branch `local/pi-support`, clean at start.
 
 - Initial focused public discovery/extraction/pipeline tests: **123 passed**.
-- `uv run pytest`: **1191 passed, 7 failed**. Two deep tests require missing
+- Initial `uv run pytest`: **1191 passed, 7 failed**. Two deep tests require missing
   `litellm`; five MCP connect tests require missing `mcp` (optional extras).
   This is **not** a green full-suite gate. No dependencies or extras were installed.
-  Full local output: `/tmp/drskill-ticket02-pytest.log`.
+  Initial local output: `/tmp/drskill-ticket02-pytest.log`.
+- Re-ran the full suite after the inherited-path fix and snapshot refactor:
+  **1193 passed, the same 7 failed** for missing optional dependencies.
+  Final local output: `/tmp/drskill-ticket02-pytest-final.log`.
 - `uv run python scripts/pi_nested_demo.py`: expected 9 occurrences / 8 resolved
   executions / 1 inherited / 0 unresolved; output inspected.
 - `uv run python -m compileall -q` on changed trace modules and demo: passed.
@@ -176,7 +180,18 @@ Parent verification found and corrected inherited path qualifications:
 the child now receives the verified owner's context and qualifications.
 Added separate aggregate-budget and missing-owner-cwd regressions.
 Post-follow-up focused tests: **125 passed**; trace-only focused tests after
-the snapshot refactor: **62 passed**. The demonstration still returns 9/8/1/0.
+the snapshot refactor: **62 passed**. The demonstration still returns 9/8/1/0. A fresh Standards follow-up reviewed
+`3a32e48` and `8824650`, independently ran all 27 nested tests, and reported
+no unresolved Standards findings or regressions. The initial four smell findings
+were resolved (three code changes, one justified retention).
+
+Spec review of `1ca77f1` reported two material findings and one minor snapshot
+consistency concern, with no scope creep. The material findings were the
+aggregate-budget regression gap and inherited-path qualification bug; the
+reviewer independently verified both fixes in `3a32e48` / `8824650`.
+The remaining minor concern (native and nested detectors reading a live file
+separately) was reproduced by a filesystem-boundary regression and corrected:
+both now consume the same bytes. Focused tests after that fix: **126 passed**.
 
 ## Source evidence and historical qualification
 

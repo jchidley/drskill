@@ -93,8 +93,9 @@ def extract(path: Path) -> PiExtractResult:
     successful_tool_calls: set[str] = set()
     previous_id: str | None = None
 
+    raw = path.read_bytes()
     for lineno, line in enumerate(
-        path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1
+        raw.decode("utf-8", errors="replace").splitlines(), start=1
     ):
         try:
             event = json.loads(line)
@@ -248,7 +249,7 @@ def extract(path: Path) -> PiExtractResult:
                         reasoning=excerpt(current_thinking),
                         detection="skill-read",
                     ))
-    result = extract_nested(path)
+    result = extract_nested(path, raw)
     result.invocations = out
     result.recognized = recognized
     return result

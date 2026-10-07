@@ -51,8 +51,8 @@ class _SessionSnapshot:
     extracted: PiExtractResult
 
 
-def extract_nested(path: Path) -> PiExtractResult:
-    return _extract_snapshot(path, path.read_bytes()).extracted
+def extract_nested(path: Path, raw: bytes) -> PiExtractResult:
+    return _extract_snapshot(path, raw).extracted
 
 
 def _extract_snapshot(path: Path, raw: bytes) -> _SessionSnapshot:
