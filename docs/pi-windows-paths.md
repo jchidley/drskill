@@ -35,7 +35,9 @@ Reference: [Python ntpath/path documentation](https://docs.python.org/3/library/
 | Ordinary POSIX request with POSIX cwd, or absolute POSIX request without Windows cwd | Existing POSIX normalization |
 
 Canonical Windows paths use forward separators and uppercase drive letters.
-Server/share/component spelling is otherwise preserved. Matching is **exact and
+UNC share roots normalize with or without a trailing separator to the same
+`//server/share` spelling; drive roots retain `C:/` (never the drive-relative
+`C:`). Server/share/component spelling is otherwise preserved. Matching is **exact and
 case-sensitive**: recorded namespace alone cannot establish the case policy of
 a Windows directory or remote UNC resource. Do not lowercase all resources,
 equate basenames, strip trailing dots/spaces, resolve symlinks or infer
@@ -141,4 +143,92 @@ must separately implement a bounded mixed-source corpus/common-window contract.
 It must not relabel this per-baseline comparison as an exact common-window report,
 nor infer Windows/WSL ancestry or resource equivalence from these normalized paths.
 
-Validation results, final commits and two-axis review are recorded below.
+## Validation and task commits
+
+Implementation commits:
+
+- `c3abd7f`: Windows lexical normalization, declared supporting paths,
+  extraction/report versions, public regressions and retained-evidence handoff.
+- `ff8bdfb`: parent-discovered forward-slash device-cwd fallback fix, with
+  red-before-green extraction regressions. Explicit absolute Windows requests
+  remain resolvable even when cwd is unsupported; cwd-dependent requests do not.
+- `213c2bf`: Spec-review UNC share-root trailing-separator normalization, with a
+  red-before-green public audit regression proving delivery/read matching.
+
+Final validation after all behavior commits, from the drskill root:
+
+- `uv run pytest tests/test_traces_*.py tests/test_cli_audit.py -q`:
+  **216 passed** (27 Windows-specific cases included).
+- `uv run pytest -q`: **1250 passed, 7 failed**, approximately 79 seconds.
+  Two failures import absent optional `litellm`; five MCP-connect tests import
+  absent optional `mcp`. These are the same seven failures documented at the
+  baseline in [pi-audit-evidence.md](pi-audit-evidence.md). This is **not a green
+  full-suite gate**. No optional dependencies were installed. Local full log:
+  `/tmp/drskill-winpaths-pytest-final.log`.
+- `uv run python -m compileall -q src/drskill/traces scripts/pi_windows_reaudit.py`
+  and `git diff --check`: passed. No configured typechecker; no typechecking claim.
+- Existing `pi_nested_demo.py` and `pi_audit_demo.py --json`: passed; audit demo
+  still reports 9 occurrences / 8 executions / 1 inherited / 0 unresolved,
+  5 skill reads and 4 combined observations, now extraction 12 / report 3.
+- Retained 801-file Windows re-audit above was run at `c3abd7f`. The subsequent
+  device-cwd guard and UNC share-root fix do not change its ordinary drive-qualified
+  request paths (independently verified **77/77** baseline requests are drive-absolute).
+  Focused regressions and the final suite cover both corrections. The corpus
+  was not needlessly reread after corrections unrelated to its paths.
+
+No ticket record was edited in the coordinator checkout. No changes were pushed,
+deployed or installed on Windows. Tickets 03/04 require their own scoped sessions.
+
+## Two-axis review
+
+Both reviewers used fresh standalone `deepseek/deepseek-flash` sessions, a
+different model family from the authoring parent; no shared review context.
+Fixed point: `cb0cec1`; initial implementation `c3abd7f`, with the parent
+correction `ff8bdfb` explicitly inspected by the Standards reviewer.
+
+### Standards
+
+The reviewer found one concrete documented-contract defect and its regression
+gap at `c3abd7f`: forward-slash device cwds could reach POSIX fallback.
+It verified `ff8bdfb` fixed both. Parent independently reproduced the two failing
+public extraction cases before that fix, then ran the focused/final checks above.
+The reviewer independently ran all **215** focused tests, compilation and
+whitespace checks successfully at corrected HEAD.
+
+Three non-blocking observations: a repeated small alias/scheme predicate
+(possible Duplicated Code), the cohesive resolver's growing namespace branches
+(possible Divergent Change), and a permissive reference-base regex whose relative
+bases nonetheless cannot resolve relative links. No observed wrong output from
+these. Local predicates are retained rather than introducing an unneeded
+namespace abstraction; absolute-base behavior remains enforced by the resolver.
+
+Standards disposition: concrete defect and regression gap resolved; no remaining
+blocking findings. Smell observations are judgment calls, not hard violations.
+
+### Spec
+
+The initial Spec reviewer reported three substantive findings at `c3abd7f`:
+the device-cwd fallback (already fixed by `ff8bdfb`), the then-incomplete final
+validation/review handoff (filled in here), and inconsistent normalization of UNC
+share roots with/without a trailing separator. Parent independently reproduced
+the UNC mismatch at the public audit seam, then fixed it in `213c2bf`, retaining
+drive-root semantics. It reported one non-blocking reference-base regex/doc
+observation shared with Standards; the resolver does not attribute relative
+support from a non-absolute declared base. No scope creep was reported.
+
+The reviewer independently ran **215** focused tests and an intermediate full
+suite (**1249 passed, 7 missing-extra failures**) before the UNC fix. Parent final
+validation supersedes those intermediate counts.
+
+The Spec follow-up independently ran the **27** Windows tests and verified all
+four device-cwd spellings, absolute-drive requests with unsupported cwd, UNC root
+separator variants and dot components, preserved drive roots, and POSIX behavior.
+It found no remaining wrong implementation or missing requirement. Its two
+handoff caveats (stale full-suite count and missing final disposition) are now
+corrected with the final **1250 passed / 7 failed** result and this paragraph.
+
+Spec disposition: all three substantive findings resolved; no blocking findings
+or scope creep. One conservative regex/documentation observation remains, with
+no incorrect attribution. Standards had two resolved defect/coverage findings
+and three non-blocking observations; Spec had three resolved substantive findings
+and one shared non-blocking observation. Neither axis has a remaining blocker.
