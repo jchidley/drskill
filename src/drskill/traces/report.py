@@ -16,7 +16,7 @@ from drskill.traces.model import Invocation
 from drskill.traces.pipeline import AuditData
 
 MIN_SPAN_DAYS = 7.0
-HEURISTIC_LEGEND = "~ counted from SKILL.md reads, not an explicit invocation event"
+HEURISTIC_LEGEND = "~ observed delivery or SKILL.md reads, not authenticated invocation intent"
 
 
 class NameStats(BaseModel):
@@ -57,7 +57,8 @@ def aggregate(invocations: list[Invocation]) -> dict[str, list[NameStats]]:
         for (kind, name, server), invs in names.items():
             stats.append(NameStats(
                 kind=kind, name=name, server=server,
-                count=sum(1 for i in invs if not i.sidechain),
+                count=len({i.combined_use_id or ("row", n) for n, i in enumerate(invs)
+                           if not i.sidechain and i.evidence_kind != "supporting-read"}),
                 sidechain=sum(1 for i in invs if i.sidechain),
                 sessions=len({i.session_id for i in invs}),
                 last_used=max(i.timestamp for i in invs),
@@ -119,6 +120,8 @@ def _get_via_text(inv: Invocation) -> str:
     if inv.detection == "explicit":
         return "explicit tool call"
     elif inv.detection == "command-marker":
+        if inv.harness == "pi":
+            return "expanded instruction delivery (not authenticated UI command)"
         return f"/{_clean(inv.name)} slash command"
     elif inv.detection == "skill-read":
         return "SKILL.md read"
@@ -183,7 +186,11 @@ def render_audit(console: Console, data: AuditData) -> None:
                           s.last_used.date().isoformat())
         console.print(table)
     if not data.invocations:
-        console.print("no skill or MCP tool invocations found in trace history")
+        if data.nested_reads:
+            console.print("no direct skill or MCP invocation rows; nested read evidence follows")
+        else:
+            console.print("no skill or MCP tool invocations found in trace history")
+    render_evidence(console, data)
     _footer(console, data)
 
 
@@ -213,7 +220,8 @@ def matches(inv: Invocation, name: str) -> bool:
 def render_drilldown(console: Console, name: str, data: AuditData) -> None:
     hits = [i for i in data.invocations if matches(i, name)]
     if not hits:
-        console.print(f"no invocations of {_clean(name)} found")
+        render_evidence(console, data, name)
+        console.print(f"no invocations of {_clean(name)} found in direct rows")
         _footer(console, data)
         return
     groups: dict[tuple, list[Invocation]] = defaultdict(list)
@@ -233,6 +241,12 @@ def render_drilldown(console: Console, name: str, data: AuditData) -> None:
             side = "  [dim](subagent)[/dim]" if inv.sidechain else ""
             console.print(f"  {when}  {_clean(inv.harness)}  {_clean(where)}{side}")
             console.print(f"    [dim]via: {_get_via_text(inv)}[/dim]")
+            if inv.requested_path:
+                console.print(f"    requested: {_clean(inv.requested_path)}")
+            if inv.result_entry_id:
+                console.print(f"    result: {_clean(inv.result_entry_id)} line {inv.result_source_line}")
+            for qualification in inv.qualifications:
+                console.print(f"    [dim]{_clean(qualification)}[/dim]")
             if inv.query:
                 console.print(f"    query: {_clean(inv.query)}")
             if inv.reasoning:
@@ -240,4 +254,47 @@ def render_drilldown(console: Console, name: str, data: AuditData) -> None:
             trace = (f"{inv.source_file}:{inv.source_line}"
                      if inv.source_line is not None else inv.source_file)
             console.print(f"    [dim]trace: {_clean(trace)}[/dim]")
+    render_evidence(console, data, name)
     _footer(console, data)
+
+
+def render_evidence(console: Console, data: AuditData, name: str | None = None) -> None:
+    from drskill.traces.evidence import summary
+    selected = data if name is None else data.model_copy(update={
+        "invocations": [i for i in data.invocations if matches(i, name)],
+        "nested_reads": [r for r in data.nested_reads if r.skill_name == name],
+    })
+    counts = summary(selected)
+    if data.extraction_versions.get("pi") is None and not data.nested_reads:
+        return
+    console.print(f"\nEvidence scope: {_clean(data.evidence_scope)}")
+    console.print(
+        f"Instruction deliveries: {counts['instruction_deliveries']} · "
+        f"skill-file reads: {counts['skill_file_reads']} · "
+        f"declared supporting reads: {counts['supporting_reads']}"
+    )
+    console.print(
+        f"Nested reads: {counts['nested_read_occurrences']} physical occurrences · "
+        f"{counts['nested_distinct_executions']} distinct executions · "
+        f"{counts['nested_inherited_occurrences']} inherited · "
+        f"{counts['nested_unresolved_occurrences']} unresolved"
+    )
+    console.print(f"Combined observed uses: {counts['combined_observed_uses']} (not workflow completion)")
+    for row in selected.nested_reads:
+        console.print(f"  {_clean(row.skill_name or 'unattributed read')} · "
+                      f"{_clean(row.evidence_kind or 'unattributed')} · {_clean(row.inheritance)}")
+        console.print(f"    requested: {_clean(row.requested_path)}")
+        console.print(f"    resolved: {_clean(row.resolved_path or 'unknown')}")
+        console.print(f"    result-record time: {_clean(row.result_record_time or 'unknown')}")
+        console.print(f"    trace: {_clean(row.source_file)}:{row.source_line} · "
+                      f"result {_clean(row.occurrence[1])} · parent {_clean(row.result_parent_id or 'unknown')}")
+        console.print(f"    snapshot: {_clean(row.source_sha256)} · owner: {_clean(str(row.execution_owner))}")
+        if row.provenance:
+            console.print(f"    fixture provenance: {_clean(str(row.provenance))}")
+        for qualification in row.qualifications:
+            console.print(f"    [dim]{_clean(qualification)}[/dim]")
+    for diagnostic in data.nested_diagnostics:
+        console.print(f"  [dim]{_clean(diagnostic.code)}: {_clean(diagnostic.detail)} "
+                      f"({_clean(diagnostic.source_file)}:{diagnostic.source_line})[/dim]")
+    for limit in data.coverage_limits:
+        console.print(f"[dim]Coverage: {_clean(limit)}[/dim]")

@@ -9,14 +9,20 @@ the adapter version.
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from drskill.traces.model import Invocation
+from drskill.traces.pi_nested import PiExtractResult
+
+CACHE_VERSION = 2
 
 
 class TraceCacheEntry(BaseModel):
+    cache_version: int = CACHE_VERSION
+    pi_evidence: PiExtractResult | None = None
     trace_path: str
     mtime_ns: int
     size: int
@@ -38,14 +44,17 @@ def load_entry(cdir: Path, trace_path: Path) -> TraceCacheEntry | None:
     """The cached entry, or None when absent, corrupt, or stale by mtime/size."""
     p = cdir / f"{entry_key(trace_path)}.json"
     try:
-        entry = TraceCacheEntry.model_validate_json(p.read_text(encoding="utf-8"))
+        payload = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict) or payload.get("cache_version") != CACHE_VERSION:
+            return None
+        entry = TraceCacheEntry.model_validate(payload)
     except (OSError, ValueError):
         return None
     try:
         st = trace_path.stat()
     except OSError:
         return None
-    if entry.mtime_ns != st.st_mtime_ns or entry.size != st.st_size:
+    if entry.cache_version != CACHE_VERSION or entry.mtime_ns != st.st_mtime_ns or entry.size != st.st_size:
         return None
     return entry
 

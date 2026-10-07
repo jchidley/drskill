@@ -744,6 +744,9 @@ def audit(
     last: bool = typer.Option(
         False, "--last", help="only the most recent session in scope"
     ),
+    branch: str | None = typer.Option(
+        None, "--branch", help="Pi raw branch leaf entry ID; requires --file"
+    ),
     json_out: bool = typer.Option(False, "--json", help="machine-readable output"),
     unused_days: int | None = typer.Option(
         None, "--unused-days",
@@ -773,6 +776,9 @@ def audit(
         except ValueError:
             console.print("[red]error:[/red] invalid --since (use 7d, 30d, or YYYY-MM-DD)")
             raise typer.Exit(1)
+    if branch is not None and file is None:
+        console.print("[red]error:[/red] --branch requires --file")
+        raise typer.Exit(1)
     if file is not None and last:
         console.print("[red]error:[/red] --file and --last cannot be combined")
         raise typer.Exit(1)
@@ -783,7 +789,7 @@ def audit(
             )
             raise typer.Exit(1)
         try:
-            data = tpipeline.run_audit_file(home, file, harness, cutoff)
+            data = tpipeline.run_audit_file(home, file, harness, cutoff, branch=branch)
         except tpipeline.UnknownTraceLocation:
             valid = ", ".join(sorted(tpipeline.ADAPTERS))
             console.print(
@@ -802,6 +808,9 @@ def audit(
         data = tpipeline.run_audit(
             home, root, global_mode, harness, cutoff, last=last
         )
+
+    from drskill.traces import evidence as tevidence
+    tevidence.classify_reads(data)
 
     # The scan join (installed-but-never-invoked) only makes sense against the
     # plain, unfiltered report: a single-entity drilldown or a --file view has
@@ -827,9 +836,10 @@ def audit(
         # Trace timestamps are UTC; using the local date to judge the
         # coverage window's boundary day can misjudge it.
         today = dt.datetime.now(dt.timezone.utc).date()
-        result = crossref.unused_contributors(
-            world, data.invocations, resolved, threshold, today
-        )
+        if not data.coverage_limits:
+            result = crossref.unused_contributors(
+                world, data.invocations, resolved, threshold, today
+            )
 
     if name is not None and not json_out:
         treport.render_drilldown(console, name, data)
@@ -846,6 +856,18 @@ def audit(
             },
             "unreadable": data.unreadable,
             "drifted": data.drifted,
+            "report_version": tevidence.REPORT_VERSION,
+            "evidence_scope": data.evidence_scope,
+            "inspected_files": data.inspected_files,
+            "extraction_versions": data.extraction_versions,
+            "coverage_limits": data.coverage_limits,
+            "nested_reads": [r.model_dump(mode="json") for r in data.nested_reads
+                             if name is None or r.skill_name == name],
+            "nested_diagnostics": [d.model_dump(mode="json") for d in data.nested_diagnostics],
+            "evidence_summary": tevidence.summary(data if name is None else data.model_copy(update={
+                "invocations": records,
+                "nested_reads": [r for r in data.nested_reads if r.skill_name == name],
+            })),
         }
         if include_crossref:
             # "unused" stays null both when there's no coverage to judge by

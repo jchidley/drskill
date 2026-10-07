@@ -25,6 +25,11 @@ class NestedDiagnostic(BaseModel):
 
 
 class NestedRead(BaseModel):
+    project: str | None = None
+    turn_id: str | None = None
+    evidence_kind: str | None = None
+    skill_name: str | None = None
+    combined_use_id: str | None = None
     occurrence: tuple[str, str, str]
     result_record_time: str | None
     result_parent_id: str | None = None
@@ -40,6 +45,9 @@ class NestedRead(BaseModel):
 
 
 class PiExtractResult(ExtractResult):
+    session_header: dict = Field(default_factory=dict)
+    result_payload_hashes: dict[str, str] = Field(default_factory=dict)
+    entry_parents: dict[str, str | None] = Field(default_factory=dict)
     nested_reads: list[NestedRead] = Field(default_factory=list)
     nested_diagnostics: list[NestedDiagnostic] = Field(default_factory=list)
 
@@ -75,6 +83,7 @@ def _extract_snapshot(path: Path, raw: bytes) -> _SessionSnapshot:
             diagnostic("malformed-entry", line, "Expected object")
     headers = [event for _, event in records if event.get("type") == "session"]
     header = headers[0] if len(headers) == 1 else {}
+    result.session_header = header
     session_id = header.get("id")
     cwd = header.get("cwd")
     seen_evidence = False
@@ -149,7 +158,22 @@ def _extract_snapshot(path: Path, raw: bytes) -> _SessionSnapshot:
             if parse_ts(time) is None:
                 time = None
                 diagnostic("missing-result-time", line, "No retained result-record timestamp")
+            parents = {e.get("id"): e for _, e in records if isinstance(e.get("id"), str)
+                       and e.get("id") not in duplicate_entries}
+            ancestor_id = event.get("parentId")
+            visited = set()
+            turn_id = None
+            while isinstance(ancestor_id, str) and ancestor_id not in visited:
+                visited.add(ancestor_id)
+                ancestor = parents.get(ancestor_id)
+                if ancestor is None:
+                    break
+                if isinstance(ancestor.get("message"), dict) and ancestor["message"].get("role") == "user":
+                    turn_id = ancestor_id
+                    break
+                ancestor_id = ancestor.get("parentId")
             result.nested_reads.append(NestedRead(
+                project=cwd if isinstance(cwd, str) else None, turn_id=turn_id,
                 occurrence=(session_id, event["id"], call_id),
                 result_record_time=time,
                 result_parent_id=event.get("parentId") if isinstance(event.get("parentId"), str) else None,
@@ -162,6 +186,15 @@ def _extract_snapshot(path: Path, raw: bytes) -> _SessionSnapshot:
         diagnostic("capability-unknown", None,
                    "No structured records retained; format version cannot establish recording capability")
     entries = {event["id"]: event for _, event in records if isinstance(event.get("id"), str)}
+    result.entry_parents = {
+        key: event.get("parentId") if isinstance(event.get("parentId"), str) else None
+        for key, event in entries.items() if key not in duplicate_entries
+    }
+    result.result_payload_hashes = {
+        key: hashlib.sha256(json.dumps(event.get("message"), sort_keys=True,
+                                      ensure_ascii=True).encode()).hexdigest()
+        for key, event in entries.items()
+    }
     return _SessionSnapshot(header=header, entries=entries, extracted=result)
 
 
@@ -185,13 +218,31 @@ def extract_corpus(paths: list[Path]) -> PiExtractResult:
         result.nested_reads.extend(snapshot.extracted.nested_reads)
         result.nested_diagnostics.extend(snapshot.extracted.nested_diagnostics)
 
-    session_ids = [snapshot.header.get("id") for snapshot in snapshots.values()]
+    return reconcile_corpus({str(path): snapshot.extracted for path, snapshot in snapshots.items()},
+                            result.nested_diagnostics)
+
+
+def reconcile_corpus(extracted: dict[str, PiExtractResult],
+                     diagnostics: list[NestedDiagnostic] | None = None) -> PiExtractResult:
+    """Recompute ownership from supplied snapshots, including cached snapshots.
+
+    Payload hashes cover the entire retained result message; no raw file bodies
+    are persisted in the cache to establish payload equality.
+    """
+    snapshots = {Path(path).resolve(): value.model_copy(deep=True)
+                 for path, value in extracted.items()}
+    result = PiExtractResult()
+    for snapshot in snapshots.values():
+        result.nested_reads.extend(snapshot.nested_reads)
+    result.nested_diagnostics = (list(diagnostics) if diagnostics is not None else
+                                [d for s in snapshots.values() for d in s.nested_diagnostics])
+    session_ids = [snapshot.session_header.get("id") for snapshot in snapshots.values()]
 
     def ancestry(path):
         chain = []
         seen = {path}
         while True:
-            header = snapshots[path].header
+            header = snapshots[path].session_header
             session_id = header.get("id")
             if not isinstance(session_id, str) or session_ids.count(session_id) != 1:
                 return chain, "ambiguous-session"
@@ -213,19 +264,21 @@ def extract_corpus(paths: list[Path]) -> PiExtractResult:
             path = parent_path
 
     for row in result.nested_reads:
-        path = Path(row.source_file)
+        row.inheritance = "unresolved"
+        row.execution_owner = None
+        path = Path(row.source_file).resolve()
         chain, problem = ancestry(path)
         owner = row
-        entry = snapshots[path].entries[row.occurrence[1]]
+        entry = snapshots[path].result_payload_hashes.get(row.occurrence[1])
         if problem is None:
             for ancestor in chain:
-                candidate = snapshots[ancestor].entries.get(row.occurrence[1])
+                candidate = snapshots[ancestor].result_payload_hashes.get(row.occurrence[1])
                 if candidate is None:
                     continue
-                if candidate.get("message") != entry.get("message"):
+                if candidate != entry:
                     problem = "conflicting-payload"
                     break
-                matches = [r for r in snapshots[ancestor].extracted.nested_reads
+                matches = [r for r in snapshots[ancestor].nested_reads
                            if r.occurrence[1:] == row.occurrence[1:]]
                 if len(matches) != 1:
                     problem = "invalid-ancestor-evidence"
