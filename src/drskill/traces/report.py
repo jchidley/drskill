@@ -265,7 +265,8 @@ def render_drilldown(console: Console, name: str, data: AuditData) -> None:
 
 
 def render_evidence(console: Console, data: AuditData, name: str | None = None) -> None:
-    from drskill.traces.evidence import summary
+    from drskill.traces.evidence import REPORT_VERSION, summary
+    from drskill.traces.cache import CACHE_VERSION
     selected = data if name is None else data.model_copy(update={
         "invocations": [i for i in data.invocations if matches(i, name)],
         "nested_reads": [r for r in data.nested_reads if r.skill_name == name],
@@ -274,6 +275,10 @@ def render_evidence(console: Console, data: AuditData, name: str | None = None) 
     if data.extraction_versions.get("pi") is None and not data.nested_reads:
         return
     console.print(f"\nEvidence scope: {_clean(data.evidence_scope)}")
+    console.print(f"Evidence versions: report {REPORT_VERSION} · "
+                  f"Pi extraction {data.extraction_versions.get('pi', 'unknown')} · cache schema {CACHE_VERSION}")
+    console.print("Path matching: lexical recorded namespace, case-sensitive; Windows "
+                  "separators/drive letter normalized; no Windows/WSL mapping or OS-access attestation")
     console.print(
         f"Instruction deliveries: {counts['instruction_deliveries']} · "
         f"skill-file reads: {counts['skill_file_reads']} · "

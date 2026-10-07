@@ -32,7 +32,7 @@ class Invocation(BaseModel):
     parent_id: str | None = None  # parentId link of that entry
     turn_id: str | None = None  # nearest ancestor user message entry id
     requested_path: str | None = None  # original read path / wrapper location
-    resolved_path: str | None = None  # lexical POSIX path normalized against cwd
+    resolved_path: str | None = None  # lexical recorded POSIX/Windows namespace, not realpath
     result_entry_id: str | None = None  # id of the certifying successful result
     result_source_line: int | None = None  # 1-based line of that result entry
     combined_use_id: str | None = None  # ties a wrapper and its same-turn read

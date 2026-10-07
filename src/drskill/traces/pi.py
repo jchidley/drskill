@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import os
-import posixpath
 import re
 from pathlib import Path
 
@@ -26,14 +25,14 @@ from drskill.traces.model import Invocation
 from drskill.traces.pi_nested import PiExtractResult, NestedDiagnostic, extract_nested
 
 HARNESS = "pi"
-VERSION = 11
+VERSION = 12
 
 _SKILL_OPEN = re.compile(r'^\s*<skill\b([^>]*)>')
 _ATTR = re.compile(
     r'([A-Za-z_][A-Za-z0-9_.:-]*)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')'
 )
 _MD_LINK = re.compile(r'\[[^\]]*\]\(([^)]+)\)')
-_REFERENCES_BASE = re.compile(r'(?i)references?\s+are\s+relative\s+to\s+(/[^\s,;]+)')
+_REFERENCES_BASE = re.compile(r'(?i)references?\s+are\s+relative\s+to\s+([^\s,;]+)')
 
 
 def trace_root(home: Path) -> Path:
@@ -128,14 +127,11 @@ def _declared_supporting_paths(body: str) -> list[str]:
         target = target.strip()
         if not target or target.startswith("#"):
             continue
-        if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target):
-            continue
         if any(ch.isspace() for ch in target):
             continue
-        if target.startswith("/"):
-            paths.append(posixpath.normpath(target))
-        elif base:
-            paths.append(posixpath.normpath(posixpath.join(base, target)))
+        resolved, _ = resolve_read_path(target, base)
+        if resolved is not None:
+            paths.append(resolved)
     out: list[str] = []
     seen: set[str] = set()
     for p in paths:

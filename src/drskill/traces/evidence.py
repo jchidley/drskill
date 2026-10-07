@@ -7,7 +7,7 @@ from pathlib import PurePosixPath
 from drskill.traces.pipeline import AuditData
 from drskill.traces.common import combined_use_id
 
-REPORT_VERSION = 2
+REPORT_VERSION = 3
 
 
 def classify_reads(data: AuditData) -> None:

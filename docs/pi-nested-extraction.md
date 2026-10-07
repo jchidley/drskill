@@ -47,7 +47,7 @@ Each row contains:
 | `result_record_time` | Retained valid ISO outer-entry timestamp, or null with a diagnostic; **not** nested-call start time |
 | `result_parent_id` | Retained parent entry ID, when present |
 | `requested_path` | Original structured spelling, including redundant dot components |
-| `resolved_path` | Lexical POSIX path normalized against header cwd, or null for unresolved aliases/namespaces/cwd |
+| `resolved_path` | Lexical recorded POSIX/Windows path normalized against header cwd, or null for unresolved aliases/namespaces/cwd; see [Windows path policy](pi-windows-paths.md) |
 | `source_file`, `source_line`, `source_sha256` | Physical snapshot provenance; hash is of bytes actually parsed |
 | `provenance` | Optional sanitized fixture source locator (`evidenceSource` in projections), not authenticated runtime metadata |
 | `qualifications` | Effective-path, historical-resource, partial-read and timestamp limits |
@@ -58,8 +58,11 @@ This establishes a finalized pipeline outcome for the **recorded request**,
 not independently attested OS access. Hooks can transform paths and outcomes.
 Lexical normalization does not establish historical realpath, immutable resource
 identity, symlink targets, file hashes or full-file coverage. Offset/limit is
-explicitly marked partial. Tilde, @ aliases, URI/scheme and Windows namespaces
-are unresolved rather than mapped through the analyzer's environment.
+explicitly marked partial. Tilde, @ aliases and URI/scheme namespaces remain
+unresolved rather than mapped through the analyzer\'s environment. Pi extraction 12
+adds qualified Windows drive-absolute, ordinary UNC and recorded-cwd-relative
+normalization; drive-relative/device paths and ambiguous cross-OS mappings remain
+unresolved. See [Windows path policy](pi-windows-paths.md).
 A read does not prove invocation intent, following instructions or task completion.
 Resource membership and declared supporting relationships remain ticket 03 work;
 the extractor does not classify every markdown read as a skill invocation.

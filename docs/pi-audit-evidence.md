@@ -84,7 +84,10 @@ immutable historical resource identity, full-file coverage or exact call time.
 
 ## Cache and coverage
 
-Pi adapter version **11**, audit cache schema **2**, evidence report version **2**.
+Current Pi adapter version **12**, audit cache schema **2**, evidence report version **3**.
+[Windows path normalization](pi-windows-paths.md) extends the recorded lexical
+namespace without mapping Windows resources or ancestry to WSL. The validation
+and review below are the historical ticket 03 baseline (extraction 11/report 2).
 Incompatible cache entries are re-extracted. Cache retains qualified rows,
 diagnostics, session ancestry, entry parents and result payload hashes, not raw
 result bodies. Ownership is recomputed over the current supplied corpus on cache

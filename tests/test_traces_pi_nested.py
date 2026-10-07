@@ -98,7 +98,7 @@ def test_synthetic_complete_rows_survive_recorder_bounds(tmp_path):
 @pytest.mark.parametrize("path,cwd,expected", [
     ("~/skills/a/SKILL.md", "/workspace", None),
     ("@/skills/a/SKILL.md", "/workspace", None),
-    ("C:\\skills\\a\\SKILL.md", "/workspace", None),
+    ("C:\\skills\\a\\SKILL.md", "/workspace", "C:/skills/a/SKILL.md"),
     ("relative/SKILL.md", None, None),
     ("/workspace/./a/../SKILL.md", None, "/workspace/SKILL.md"),
 ])

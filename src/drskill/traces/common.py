@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import ntpath
 import posixpath
 import re
 
@@ -58,8 +59,39 @@ def munge_path(p: str) -> str:
 
 
 def resolve_read_path(requested: str, cwd: str | None) -> tuple[str | None, list[str]]:
-    """Lexical POSIX normalization of a requested path against the session cwd."""
+    """Lexical recorded-namespace normalization; never consult the host filesystem."""
     qualifications: list[str] = []
+    windows_qualification = [
+        "Windows lexical namespace; separators and drive letter normalized; case-sensitive matching because resource case policy is unknown",
+    ]
+
+    def windows_absolute(value: str) -> bool:
+        drive, tail = ntpath.splitdrive(value)
+        if re.fullmatch(r"[A-Za-z]:", drive):
+            return tail.startswith(("/", "\\"))
+        # Ordinary UNC only; device/extended namespaces are deliberately unsupported.
+        parts = drive.replace("\\", "/").split("/")
+        return (len(parts) == 4 and parts[:2] == ["", ""]
+                and all(parts[2:]) and parts[2] not in ("?", "."))
+
+    def windows_normalize(value: str) -> str:
+        normalized = ntpath.normpath(value).replace("\\", "/")
+        if re.match(r"^[A-Za-z]:", normalized):
+            normalized = normalized[0].upper() + normalized[1:]
+        return normalized
+
+    if requested.startswith(("\\\\?\\", "\\\\.\\", "//?/", "//./")):
+        return None, ["Unresolved Windows device or extended namespace"]
+    if windows_absolute(requested):
+        return windows_normalize(requested), windows_qualification
+    if isinstance(cwd, str) and windows_absolute(cwd):
+        # Root-relative requests lack a drive/share; POSIX-looking absolute paths
+        # could instead be WSL aliases. Neither is inferred from a Windows cwd.
+        if requested.startswith(("/", "\\")):
+            return None, ["Unresolved rooted path: ambiguous Windows/POSIX namespace"]
+        if not (requested.startswith(("~", "@"))
+                or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", requested)):
+            return windows_normalize(ntpath.join(cwd, requested)), windows_qualification
     if (requested.startswith(("~", "@"))
             or re.match(r"^[A-Za-z]:", requested)
             or "\\" in requested
