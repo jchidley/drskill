@@ -185,6 +185,24 @@ def test_mixed_absolute_posix_and_windows_reads_keep_distinct_namespaces(tmp_pat
     assert summary(data)["combined_observed_uses"] == 2
 
 
+def test_unc_share_root_separator_variants_match_declared_resource(tmp_path):
+    from drskill.traces.pipeline import run_audit_file
+    from drskill.traces.evidence import summary
+    path = session(tmp_path, None, "\\\\server\\share\\")
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+    records[1]["parentId"] = "u"
+    records.insert(1, {
+        "type": "message", "id": "u", "parentId": None,
+        "timestamp": "2026-10-07T00:00:00Z",
+        "message": {"role": "user", "content":
+                    '<skill name="share-root" location="//server/share">body</skill>'}})
+    path.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+    data = run_audit_file(tmp_path, path, "pi", None)
+    assert data.nested_reads[0].resolved_path == "//server/share"
+    assert data.nested_reads[0].evidence_kind == "skill-file-read"
+    assert summary(data)["combined_observed_uses"] == 1
+
+
 def test_windows_absolute_read_preserves_recorded_evidence(tmp_path):
     requested = r"C:\Skills\example\.\docs\..\SKILL.md"
     [row] = pi.extract(session(tmp_path, "/workspace", requested)).nested_reads

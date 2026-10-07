@@ -78,6 +78,10 @@ def resolve_read_path(requested: str, cwd: str | None) -> tuple[str | None, list
         normalized = ntpath.normpath(value).replace("\\", "/")
         if re.match(r"^[A-Za-z]:", normalized):
             normalized = normalized[0].upper() + normalized[1:]
+        # ntpath keeps a root separator for UNC shares only when supplied;
+        # both spellings designate the same share root (unlike C: versus C:/).
+        if normalized.startswith("//"):
+            normalized = normalized.rstrip("/")
         return normalized
 
     device_prefixes = ("\\\\?\\", "\\\\.\\", "//?/", "//./")
