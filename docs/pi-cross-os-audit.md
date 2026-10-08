@@ -137,7 +137,7 @@ not typechecking. No optional dependencies are installed by this task.
 - `uv run python -m compileall -q src/drskill`: passed.
 - The focused run's subsequent `git diff --check` caught an extra trailing blank
   line in the test file. Removed afterward; no behavioral changes followed
-  the full-suite run. Final whitespace validation is recorded at commit time.
+  the full-suite run. Final `git diff --check`: passed before the correction commit.
 - No configured typechecking or lint gate was run. Compilation is syntax
   validation only.
 
@@ -190,8 +190,8 @@ by the parent through the stated public regressions and final validation.
 ## Task commits and handoff limits
 
 - `26bf44d`: explicit cross-OS corpus, report contract and public regressions.
-- Follow-up commit: review corrections, three additional regressions and this
-  validation record (the Git history identifies its exact hash).
+- `9df2326`: review corrections, three additional regressions and the
+  validation record.
 
 Coordinator ticket status is not edited from this project session. No personal
 Windows/WSL census, Windows deployment, upstream execution, push, or remote
