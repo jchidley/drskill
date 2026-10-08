@@ -47,6 +47,7 @@ def test_declared_cross_location_copy_and_cache_removal(tmp_path):
     assert cached.model_dump() == data.model_dump()
     removed = pipeline.run_audit_files(tmp_path, [child], "pi", START, END)
     assert removed.nested_reads[0].execution_owner is None
+    assert any(d.code == "ancestry-missing-parent" for d in removed.nested_diagnostics)
     assert summary(removed)["combined_observed_uses"] == 0
 
 
@@ -198,7 +199,35 @@ def test_cli_rejects_unbounded_ancestry_mapping_and_invalid_policy(tmp_path, mon
         assert rejected.exit_code == 1, rejected.output
 
 
+def test_untimed_activity_does_not_get_an_invented_weekly_rate(tmp_path):
+    from tests.test_traces_audit_evidence import wrapper
+    from drskill.traces.report import rollup
+    user = wrapper()
+    user.pop("timestamp")
+    path = session(tmp_path, "untimed.jsonl", [user])
+    data = pipeline.run_audit_files(tmp_path, [path], "pi", START, END)
+    assert rollup(data.invocations)[0][1] is None
 
 
+def test_existing_scan_cli_retains_available_source_metadata(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+    from drskill.cli import app
+    monkeypatch.setenv("DRSKILL_HOME", str(tmp_path))
+    path = session(tmp_path, "win.jsonl", [result()], cwd="C:/work",
+                   os="win32", runtimeVersion="sanitized-runtime", version=3)
+    output = CliRunner().invoke(app, ["audit", "--global", "--harness", "pi", "--json"])
+    assert output.exit_code == 0, output.output
+    payload = json.loads(output.output)
+    source = payload["sources"][str(path)]
+    assert source["path_namespace"] == "windows"
+    assert source["producer_version"] == "sanitized-runtime"
+    assert source["session_format_version"] == 3
+    assert source["inspected_records"] == 2
 
 
+def test_inspected_records_do_not_count_blank_or_malformed_lines(tmp_path):
+    path = session(tmp_path, "main.jsonl", [result()])
+    path.write_text(path.read_text() + "\nnot-json\n")
+    data = pipeline.run_audit_files(tmp_path, [path], "pi", START, END)
+    assert data.sources[str(path)]["inspected_records"] == 2
+    assert any(d.code == "malformed-json" for d in data.nested_diagnostics)

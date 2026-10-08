@@ -92,16 +92,18 @@ def coverage(invocations: list[Invocation]) -> dict[str, Coverage]:
     }
 
 
-def rollup(invocations: list[Invocation]) -> list[tuple[NameStats, float]]:
+def rollup(invocations: list[Invocation]) -> list[tuple[NameStats, float | None]]:
     per_harness = aggregate(invocations)
     cov = coverage(invocations)
     merged: dict[tuple, NameStats] = {}
     rates: dict[tuple, float] = defaultdict(float)
+    unknown_rates = {_key(i) for i in invocations if observation_time(i) is None}
     for harness, stats in per_harness.items():
-        weeks = cov[harness].span_days / 7.0 if harness in cov else 1.0
+        weeks = cov[harness].span_days / 7.0 if harness in cov else None
         for s in stats:
             key = (s.kind, s.name, s.server, s.resource)
-            rates[key] += s.count / weeks
+            if weeks is not None and key not in unknown_rates:
+                rates[key] += s.count / weeks
             if key in merged:
                 m = merged[key]
                 merged[key] = m.model_copy(update={
@@ -113,8 +115,8 @@ def rollup(invocations: list[Invocation]) -> list[tuple[NameStats, float]]:
                 })
             else:
                 merged[key] = s
-    ranked = [(merged[k], rates[k]) for k in merged]
-    ranked.sort(key=lambda pair: (-pair[1], pair[0].name))
+    ranked = [(merged[k], None if k in unknown_rates else rates[k]) for k in merged]
+    ranked.sort(key=lambda pair: (pair[1] is None, -(pair[1] or 0), pair[0].name))
     return ranked
 
 
@@ -195,7 +197,7 @@ def render_audit(console: Console, data: AuditData) -> None:
             marker = " ~" if s.heuristic else ""
             table.add_row(_clean(s.name) + marker,
                           s.kind.replace("mcp_tool", "tool"),
-                          _uses_cell(s), f"{rate:.1f}",
+                          _uses_cell(s), f"{rate:.1f}" if rate is not None else "unknown",
                           s.last_used.date().isoformat() if s.last_used else "unknown")
         console.print(table)
     if not data.invocations:
@@ -304,6 +306,8 @@ def render_evidence(console: Console, data: AuditData, name: str | None = None) 
                       f"{source_counts['supporting_reads']} supporting / "
                       f"{source_counts['unattributed_reads']} unattributed · "
                       f"{source_counts['combined_observed_uses']} qualified combined observations")
+        console.print(f"  native/delivery ownership: {source_counts['native_inherited_occurrences']} inherited / "
+                      f"{source_counts['native_unresolved_occurrences']} unresolved")
         console.print(f"  nested ownership: {source_counts['nested_inherited_occurrences']} inherited / "
                       f"{source_counts['nested_unresolved_occurrences']} unresolved")
         if source.get("recorded_location"):

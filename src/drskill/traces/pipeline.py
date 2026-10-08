@@ -12,7 +12,7 @@ from drskill.traces.common import munge_path
 from drskill.traces.model import Invocation
 from drskill.traces.pi_nested import (
     NestedRead, NestedDiagnostic, PiExtractResult, reconcile_corpus,
-    extract_corpus as extract_pi_nested_corpus,
+    extract_corpus as extract_pi_nested_corpus,  # public ticket 02 extraction seam
 )
 from drskill.traces.common import parse_ts, resolve_read_path
 
@@ -50,6 +50,49 @@ class AuditData(BaseModel):
     sources: dict[str, dict] = Field(default_factory=dict)
 
 
+def _load_or_extract(cdir: Path, path: Path, adapter, use_cache: bool = True) -> cache.TraceCacheEntry:
+    entry = cache.load_entry(cdir, path) if use_cache else None
+    if entry is not None and entry.adapter == adapter.HARNESS and entry.adapter_version == adapter.VERSION:
+        return entry
+    st = path.stat()
+    extracted = adapter.extract(path)
+    entry = cache.TraceCacheEntry(
+        trace_path=str(path), mtime_ns=st.st_mtime_ns, size=st.st_size,
+        adapter=adapter.HARNESS, adapter_version=adapter.VERSION,
+        recognized=extracted.recognized, invocations=extracted.invocations,
+        pi_evidence=extracted if isinstance(extracted, PiExtractResult) else None)
+    if use_cache:
+        cache.store_entry(cdir, entry)
+    return entry
+
+
+def _source_metadata(path: Path, entry: cache.TraceCacheEntry,
+                     recorded_location: str | None = None) -> dict:
+    header = entry.pi_evidence.session_header if entry.pi_evidence else {}
+    cwd = header.get("cwd")
+    normalized, quals = resolve_read_path(cwd, None) if isinstance(cwd, str) else (None, [])
+    return {
+        "physical_location": str(path),
+        "recorded_location": recorded_location,
+        "recorded_os": header.get("os"),
+        "recorded_cwd": cwd,
+        "path_namespace": ("windows" if normalized and (
+            normalized.startswith("//") or len(normalized) > 1 and normalized[1] == ":")
+            else "posix" if normalized else "unknown"),
+        "session_id": header.get("id"),
+        "parent_session": header.get("parentSession"),
+        "session_format_version": header.get("version"),
+        "producer_version": header.get("agentVersion") or header.get("runtimeVersion"),
+        "producer_metadata": {k: header[k] for k in ("runtimeVersion", "producer", "agentVersion") if k in header},
+        "extraction_version": entry.adapter_version,
+        "qualifications": quals + ["Storage location does not establish execution OS; cwd namespace is lexical"],
+        "source_sha256": entry.pi_evidence.source_sha256 if entry.pi_evidence else None,
+        "inspected_records": entry.pi_evidence.inspected_records if entry.pi_evidence else None,
+        "inspected_invocations": len(entry.invocations),
+        "inspected_nested_reads": len(entry.pi_evidence.nested_reads) if entry.pi_evidence else 0,
+    }
+
+
 def run_audit(
     home: Path,
     root: Path,
@@ -70,26 +113,15 @@ def run_audit(
     for adapter in selected:
         for trace in adapter.discover(home):
             data.extraction_versions[adapter.HARNESS] = adapter.VERSION
-            entry = cache.load_entry(cdir, trace)
-            if entry is None or entry.adapter_version != adapter.VERSION:
-                try:
-                    st = trace.stat()
-                    result = adapter.extract(trace)
-                except Exception:
-                    data.unreadable.append(str(trace))
-                    continue
-                entry = cache.TraceCacheEntry(
-                    trace_path=str(trace), mtime_ns=st.st_mtime_ns,
-                    size=st.st_size, adapter=adapter.HARNESS,
-                    adapter_version=adapter.VERSION,
-                    recognized=result.recognized,
-                    invocations=result.invocations,
-                    pi_evidence=result if isinstance(result, PiExtractResult) else None,
-                )
-                cache.store_entry(cdir, entry)
+            try:
+                entry = _load_or_extract(cdir, trace, adapter)
+            except Exception:
+                data.unreadable.append(str(trace))
+                continue
             if entry.recognized == 0 and entry.size > 0:
                 data.drifted[adapter.HARNESS] = data.drifted.get(adapter.HARNESS, 0) + 1
             data.inspected_files.append(str(trace))
+            data.sources[str(trace)] = _source_metadata(trace, entry)
             data.invocations.extend(entry.invocations)
             if entry.pi_evidence is not None:
                 pi_snapshots[str(trace)] = entry.pi_evidence
@@ -153,17 +185,7 @@ def run_audit_files(
         raise ValueError("Source location must name a supplied physical file")
     for path in supplied:
         adapter = ADAPTERS[harness] if harness else infer_adapter(path, home)
-        st = path.stat()
-        entry = cache.load_entry(cdir, path) if use_cache else None
-        if entry is None or entry.adapter != adapter.HARNESS or entry.adapter_version != adapter.VERSION:
-            extracted = adapter.extract(path)
-            entry = cache.TraceCacheEntry(
-                trace_path=str(path), mtime_ns=st.st_mtime_ns, size=st.st_size,
-                adapter=adapter.HARNESS, adapter_version=adapter.VERSION,
-                recognized=extracted.recognized, invocations=extracted.invocations,
-                pi_evidence=extracted if isinstance(extracted, PiExtractResult) else None)
-            if use_cache:
-                cache.store_entry(cdir, entry)
+        entry = _load_or_extract(cdir, path, adapter, use_cache)
         data.inspected_files.append(str(path))
         data.extraction_versions[adapter.HARNESS] = adapter.VERSION
         if not entry.recognized and entry.size:
@@ -172,29 +194,7 @@ def run_audit_files(
             snapshots[str(path)] = entry.pi_evidence
         else:
             data.invocations.extend(entry.invocations)
-        header = entry.pi_evidence.session_header if entry.pi_evidence else {}
-        cwd = header.get("cwd")
-        normalized, quals = resolve_read_path(cwd, None) if isinstance(cwd, str) else (None, [])
-        data.sources[str(path)] = {
-            "physical_location": str(path),
-            "recorded_location": locations.get(str(path)),
-            "recorded_os": header.get("os"),
-            "recorded_cwd": cwd,
-            "path_namespace": ("windows" if normalized and (
-                normalized.startswith("//") or len(normalized) > 1 and normalized[1] == ":")
-                else "posix" if normalized else "unknown"),
-            "session_id": header.get("id"),
-            "parent_session": header.get("parentSession"),
-            "session_format_version": header.get("version"),
-            "producer_version": header.get("agentVersion") or header.get("runtimeVersion"),
-            "producer_metadata": {k: header[k] for k in ("runtimeVersion", "producer", "agentVersion") if k in header},
-            "extraction_version": adapter.VERSION,
-            "qualifications": quals + ["Storage location does not establish execution OS; cwd namespace is lexical"],
-            "source_sha256": entry.pi_evidence.source_sha256 if entry.pi_evidence else None,
-            "inspected_records": entry.pi_evidence.inspected_records if entry.pi_evidence else None,
-            "inspected_invocations": len(entry.invocations),
-            "inspected_nested_reads": len(entry.pi_evidence.nested_reads) if entry.pi_evidence else 0,
-        }
+        data.sources[str(path)] = _source_metadata(path, entry, locations.get(str(path)))
     nested = reconcile_corpus(snapshots, source_locations=locations)
     data.invocations.extend(nested.invocations)
     data.nested_reads = nested.nested_reads

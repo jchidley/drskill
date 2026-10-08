@@ -62,7 +62,6 @@ def _extract_snapshot(path: Path, raw: bytes) -> PiExtractResult:
     records = []
     source_sha256 = hashlib.sha256(raw).hexdigest()
     result.source_sha256 = source_sha256
-    result.inspected_records = len(raw.splitlines())
 
     def diagnostic(code, line, detail):
         result.nested_diagnostics.append(NestedDiagnostic(
@@ -77,6 +76,7 @@ def _extract_snapshot(path: Path, raw: bytes) -> PiExtractResult:
             records.append((line, event))
         else:
             diagnostic("malformed-entry", line, "Expected object")
+    result.inspected_records = len(records)
     headers = [event for _, event in records if event.get("type") == "session"]
     header = headers[0] if len(headers) == 1 else {}
     result.session_header = header

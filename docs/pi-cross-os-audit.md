@@ -124,5 +124,78 @@ Syntax command:
 No typechecking/lint gate is declared in `pyproject.toml`; syntax compilation is
 not typechecking. No optional dependencies are installed by this task.
 
-Final focused/full results, two-axis review and commits are recorded below after
-validation. Coordinator ticket status is not edited from this project session.
+## Final parent validation
+
+- `uv run pytest tests/test_traces_*.py tests/test_cli_audit.py -q`:
+  **229 passed**.
+- Full suite, run once by the parent after behavioral corrections:
+  `uv run pytest -q` — **1,263 passed, 7 failed**.
+  Two deep tests fail because `litellm` is missing; five MCP-connect tests
+  fail because `mcp` is missing. These match the prior handoff's optional-extra
+  failures. No extras were installed. **The full-suite gate is not green.**
+  Local evidence: `/tmp/drskill-ticket04-pytest-final.log`.
+- `uv run python -m compileall -q src/drskill`: passed.
+- The focused run's subsequent `git diff --check` caught an extra trailing blank
+  line in the test file. Removed afterward; no behavioral changes followed
+  the full-suite run. Final whitespace validation is recorded at commit time.
+- No configured typechecking or lint gate was run. Compilation is syntax
+  validation only.
+
+The Spec reviewer independently ran the full suite on committed `26bf44d`,
+reporting 1,260 passed and the same seven optional-extra failures. The parent's
+final run above includes three post-review regressions and supersedes that count.
+
+## Standards review
+
+Separate fresh DeepSeek review of `26bf44d` against the confirmed baseline:
+two documentation concerns and four heuristic smell categories; no functional
+defect reported.
+
+- The missing-ancestor coverage concern was not confirmed: the cross-location
+  cache regression already removes the supplied ancestor. Added an explicit
+  `ancestry-missing-parent` assertion to make it unambiguous.
+- The pending validation-record concern is resolved by this section.
+- Consolidated repeated cache load/extract/store policy in `_load_or_extract`.
+- The purported dead import was independently disproved: existing public
+  callers/tests import `extract_pi_nested_corpus` from the pipeline. A trial
+  removal caused seven focused failures; restored and documented the re-export.
+- Retained separate native/nested ownership update code: both use the shared
+  `verified_owner` policy but have different row contracts. Retained the small
+  JSON metadata dictionaries; introducing a second typed reporting domain is
+  not required by this bounded feature. These are heuristic maintainability
+  suggestions, not demonstrated failures.
+
+## Spec review
+
+Separate fresh DeepSeek review of committed `26bf44d`: three actionable
+report/documentation findings and one explicitly non-violating interpretation;
+no incorrect ancestry, cache ownership or aggregate behavior reported.
+
+- Final validation/review/task-commit evidence is recorded here.
+- Directory-scan source metadata was missing despite being available in cached
+  snapshots. Reproduced with a failing existing-CLI regression; both scan and
+  explicit corpus now share `_source_metadata`.
+- Inspected records counted raw lines. Reproduced with blank/malformed lines;
+  now counts parsed object records, retaining malformed-line diagnostics.
+- Unknown Windows case policy deliberately remains case-sensitive rather than
+  guessing alias equivalence. No change.
+- Parent additionally reproduced an invented weekly rate for untimed-only
+  activity; rates now remain unknown whenever their activity includes untimed
+  rows. The public report regression verifies this.
+
+Both reviews are cross-family relative to the OpenAI author. Their original
+findings are kept separate above; review follow-ups were independently checked
+by the parent through the stated public regressions and final validation.
+
+## Task commits and handoff limits
+
+- `26bf44d`: explicit cross-OS corpus, report contract and public regressions.
+- Follow-up commit: review corrections, three additional regressions and this
+  validation record (the Git history identifies its exact hash).
+
+Coordinator ticket status is not edited from this project session. No personal
+Windows/WSL census, Windows deployment, upstream execution, push, or remote
+service connection was performed. Ticket 05 can use the existing CLI/API
+interfaces above; it must supply its own explicitly bounded evidence corpus,
+common absolute window and established relocation provenance. Missing evidence
+still prevents confident unused classifications.
